@@ -2,7 +2,6 @@
 # Tiny Shakespeare Dataset
 # !wget https://raw.githubusercontent.com/karpathy/char-rnn/master/data/tinyshakespeare/input.txt
 
- 
 import torch
 import torch.nn as nn
 from torch.nn import functional
@@ -13,7 +12,7 @@ print(cuda, torch.cuda.get_device_name())
 
 batch_size = 16
 context = 32
-num_emb = 128
+emb_dims = 128
 eval_iters = 200
 eval_interval = 500
 device = 'cuda' if cuda else 'cpu'
@@ -65,10 +64,9 @@ def get_batch(split):
 
     # ix is a list of random offsets. Length of ix list is equal to the batch_size. It is essentially used to sample "batch_size" number of rows from the data
     ix = torch.randint(len(data) - context, (batch_size,))
-    # print(f"ix is: {ix}")
     x = list(range(len(ix)))
     y = list(range(len(ix)))
-    # print(f"Data is: {data[0]}")
+
     for idx, offset in enumerate(ix):
       x[idx] = data[offset : offset+context]
       y[idx] = data[offset+1 : offset+context+1]
@@ -78,9 +76,6 @@ def get_batch(split):
     y = torch.stack(y).to(device=device)
 
     return x, y
-
-xb, yb = get_batch('train')
-
 
 @torch.no_grad()
 def estimate_loss(model):
@@ -97,33 +92,36 @@ def estimate_loss(model):
     return out
 
 # Single Self Attention Head
-class Head(nn.Module):
+class DecoderHead(nn.Module):
 
     def __init__(self, head_size):
         super().__init__()
         self.head_size = head_size
-        self.key = nn.Linear(num_emb, head_size, bias=False)
-        self.query = nn.Linear(num_emb, head_size, bias=False)
-        self.value = nn.Linear(num_emb, head_size, bias=False)
+        # Key, Query and Value weights are (D, H)
+        self.key = nn.Linear(emb_dims, head_size, bias=False)
+        self.query = nn.Linear(emb_dims, head_size, bias=False)
+        self.value = nn.Linear(emb_dims, head_size, bias=False)
         self.register_buffer('tril', torch.tril(torch.ones(context, context)))
 
-        # self.dropout = nn.Dropout(dropout)
-
+    # Input is (B, C, D) ; Output is (B, C, H)
     def forward(self, x: torch.Tensor):
-        B, T, C = x.shape
-        key_for_x =  self.key(x)   # (B, T, 16)
-        query_for_x = self.query(x) # (B, T, 16)
-        wei_for_x=  query_for_x @ key_for_x.transpose(-2, -1) * self.head_size **-0.5 # (B, T, 16) @ (B, 16, T) => (B, T, T)
+        B, C, D = x.shape # Batch, Context, Dimensionality
+        key_for_x =  self.key(x) # (B, C, D) @ (B, D, H) -> (B, C, H)
+        query_for_x = self.query(x) # (B, C, D) @ (B, D, H) -> (B, C, H)
+        value_for_x = self.value(x) # (B, C, D) @ (B, D, H) -> (B, C, H)
+        wei_for_x=  query_for_x @ key_for_x.transpose(-2, -1) * self.head_size **-0.5 # (B, C, H) @ (B, H, C) => (B, C, C)
         # compute attention scores ("affinities")
-        wei_for_x = wei_for_x.masked_fill(self.tril[:T, :T] == 0, float('-inf')) # (B, T, T)
-        wei_for_x = functional.softmax(wei_for_x, dim=-1) # (B, T, T)
+
+        wei_for_x = wei_for_x.masked_fill(self.tril[:C, :C] == 0, float('-inf')) # (B, C, C)
+        wei_for_x = functional.softmax(wei_for_x, dim=-1) # (B, C, C)
+
         # perform the weighted aggregation of the values
-        value_for_x = self.value(x) # (B,T,C)
-        out = wei_for_x @ value_for_x # (B, T, T) @ (B, T, C) -> (B, T, C)
+
+        out = wei_for_x @ value_for_x # (B, C, C) @ (B, C, H) -> (B, C, H)
         return out
 
 # Multiple Self Attention Heads in Parallel
-class MultiHeadAttention(nn.Module):
+class DecoderMultiHeadAttention(nn.Module):
     
 
     def __init__(self, num_heads, head_size):
@@ -132,10 +130,9 @@ class MultiHeadAttention(nn.Module):
         heads = list(range(num_heads))
 
         for idx in range(num_heads):
-            heads[idx] = Head(head_size=head_size)
+            heads[idx] = DecoderHead(head_size=head_size)
 
         self.heads = nn.ModuleList(heads)
-        self.proj = nn.Linear(num_emb, num_emb)
 
     def forward(self, x):
         outputs = list(range(len(self.heads)))
@@ -146,15 +143,15 @@ class MultiHeadAttention(nn.Module):
         out = torch.cat(tensors=outputs, dim=-1)
         return out
     
-# A Simple Linear Layer with ReLU
+# A Simple Linear Layer with ReLU for adding computational abilities
 class FeedFoward(nn.Module):
 
-    def __init__(self, num_emb):
+    def __init__(self, emb_dims):
         super().__init__()
         self.net = nn.Sequential( 
-            nn.Linear(num_emb, 4 * num_emb), 
+            nn.Linear(emb_dims, 4 * emb_dims), 
             nn.ReLU(),
-            nn.Linear(4 * num_emb, num_emb),
+            nn.Linear(4 * emb_dims, emb_dims),
         )
 
     def forward(self, x):
@@ -163,51 +160,61 @@ class FeedFoward(nn.Module):
 # Transformer Block: Communication followed by Computation 
 class Block(nn.Module):
 
-    def __init__(self, num_emb, num_heads):
-        # num_emb: embedding dimension, num_heads: the number of heads we'd like
+    def __init__(self, emb_dims, num_heads):
+        # emb_dims: embedding dimension, num_heads: the number of heads we'd like
         super().__init__()
-        head_size = num_emb // num_heads
-        self.self_att = MultiHeadAttention(num_heads, head_size)
-        self.feed_fwd = FeedFoward(num_emb)
+
+        # Divide the embedding dimensions by the number of heads to get the head size
+        head_size = emb_dims // num_heads
+
+        # Communication
+        self.self_att = DecoderMultiHeadAttention(num_heads, head_size)
+
+        # Computation
+        self.feed_fwd = FeedFoward(emb_dims)
 
         # Adding Layer Normalization
-        self.ln1 = nn.LayerNorm(num_emb)
-        self.ln2 = nn.LayerNorm(num_emb)
+        self.ln1 = nn.LayerNorm(emb_dims)
+        self.ln2 = nn.LayerNorm(emb_dims)
 
 
     def forward(self, x):
+        # Residual connections allow the network to learn the simplest possible function. No matter how many complex layer we start by learning a linear function and the complex layers add in non linearity as needed to learn true function.
         x = x + self.self_att(self.ln1(x))
         x = x + self.feed_fwd(self.ln2(x))
         return x
 
  
-class TransformerLanguageModel(nn.Module):
+class DecoderBlock(nn.Module):
 
     def __init__(self):
         super().__init__()
        
         # Token embedding table is used for token identification encoding
         # Position embedding table is used for token position (in reference to the current context) encoding
-        self.token_embedding_table = nn.Embedding(vocab_size, num_emb)
-        self.position_embedding_table = nn.Embedding(context, num_emb)
+        self.token_embedding_table = nn.Embedding(vocab_size, emb_dims)
+        self.position_embedding_table = nn.Embedding(context, emb_dims)
 
         self.blocks = nn.Sequential(
-            Block(num_emb=num_emb, num_heads=4),
-            Block(num_emb=num_emb, num_heads=4),
-            Block(num_emb=num_emb, num_heads=4),
+            Block(emb_dims=emb_dims, num_heads=4),
+            Block(emb_dims=emb_dims, num_heads=4),
+            Block(emb_dims=emb_dims, num_heads=4),
         )
 
-        self.ln_f = nn.LayerNorm(num_emb) # Final layer norm
+        # Final layer norm
+        self.ln_f = nn.LayerNorm(emb_dims) 
         
         # Language model head used for output
-        self.lm_head = nn.Linear(num_emb, vocab_size)
+        self.lm_head = nn.Linear(emb_dims, vocab_size)
 
     def forward(self, idx, targets=None):
-        B, T = idx.shape
+        B, C = idx.shape
 
-        # idx and targets are both (B,T) tensor of integers
-        tok_emb = self.token_embedding_table(idx) # (B,T,C)
-        pos_emb = self.position_embedding_table(torch.arange(T, device="cuda")) # (T,C)
+        # idx and targets are both (B,C) tensor of integers
+        tok_emb = self.token_embedding_table(idx) # (B,C,D)
+
+        # Getting the position embedding for all the positions, starting from 0 -> context - 1
+        pos_emb = self.position_embedding_table(torch.arange(C, device="cuda")) # (C,D)
         x = tok_emb + pos_emb
         x = self.blocks(x)
         x = self.ln_f(x) 
@@ -216,15 +223,15 @@ class TransformerLanguageModel(nn.Module):
         if targets is None:
             loss = None
         else:
-            B, T, C = logits.shape
-            logits = logits.view(B*T, C)
-            targets = targets.view(B*T)
+            B, C, D = logits.shape
+            logits = logits.view(B*C, D)
+            targets = targets.view(B*C)
             loss = functional.cross_entropy(logits, targets)
 
         return logits, loss
 
     def generate(self, idx, max_new_tokens):
-        # idx is (B, T) array of indices in the current context
+        # idx is (B, C) array of indices in the current context
         for _ in range(max_new_tokens):
 
             # crop idx to the last context 
@@ -232,22 +239,22 @@ class TransformerLanguageModel(nn.Module):
 
             # Get the predictions
             logits, loss = self.forward(idx=idx_cond)
-            # Focus only on the last  step which contains the output considering the entire context window
 
-            # logits are (batch_size, dimensionality) which is essentially the output vector for each batch
+            # Focus only on the last step which contains the output considering the entire context window
+            # logits are (batch_size, context = full context considered time step, dimensionality) which is essentially the output vector for each batch
             logits = logits[:, -1, :] 
+
             # Apply softmax to get probabilities
             probs = functional.softmax(logits, dim=1)
 
-            # sample from the distribution
+            # Sample from the distribution
             idx_next = torch.multinomial(probs, num_samples=1) # (B, 1)
-            # append sampled index to the running sequence
 
-            # appended along the context_window hence the context keeps building up
+            # Appended along the context_window hence the context keeps building up
             idx = torch.cat((idx, idx_next), dim=1) # (batch_size, context_window + 1)
         return idx
 
-model = TransformerLanguageModel().to(device=device)
+model = DecoderBlock().to(device=device)
 
 # Print the number of parameters in the model
 print(sum(param.numel() for param in model.parameters()) / 1e6, 'M parameters')
