@@ -106,7 +106,11 @@ class DecoderHead(nn.Module):
     # Input is (B, C, D) ; Output is (B, C, H)
     def forward(self, x: torch.Tensor):
         B, C, D = x.shape # Batch, Context, Dimensionality
+      
+        # key(x) is essentially what the context contains
         key_for_x =  self.key(x) # (B, C, D) @ (B, D, H) -> (B, C, H)
+        
+        # query(x) is what the context is looking for 
         query_for_x = self.query(x) # (B, C, D) @ (B, D, H) -> (B, C, H)
         value_for_x = self.value(x) # (B, C, D) @ (B, D, H) -> (B, C, H)
         wei_for_x=  query_for_x @ key_for_x.transpose(-2, -1) * self.head_size **-0.5 # (B, C, H) @ (B, H, C) => (B, C, C)
