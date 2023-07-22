@@ -35,7 +35,7 @@ class ByteTokenizer:
 # Single Self Attention Head
 class SelfAttentionHead(nn.Module):
 
-    def __init__(self, head_size):
+    def __init__(self, emb_dims, head_size):
         super().__init__()
         self.head_size = head_size
         # Key, Query and Value weights are (D, H)
@@ -247,7 +247,8 @@ emb_dims = 128
 print_interval = 500
 device = 'cuda' if cuda else 'cpu'
 max_iters = 5000
-epochs = 3
+epochs = 10
+
 
 # %%
 # Reading the file
@@ -293,14 +294,14 @@ optimizer = torch.optim.AdamW(model.parameters(), lr=1e-3)
 # %%
 # Training loop
 
-total_loss = 0
-progress_bar = tqdm(range(len(dataloader)))
+progress_bar = tqdm(range(epochs * len(dataloader)))
 
 for epoch in range(epochs):
+    total_loss = 0
     for step, batch in enumerate(dataloader):
         # every once in a while evaluate the loss on train and val sets
         if step % print_interval == 0 :
-            print(f"step {step}: train loss {total_loss / (step + 1)}")
+            tqdm.write(f"step {step}: train loss {total_loss / (step + 1)}")
 
         x, y = batch
         # evaluate the loss
@@ -311,6 +312,8 @@ for epoch in range(epochs):
         optimizer.step()
         progress_bar.update(1)
 
+
+torch.save(model.state_dict(), './makemore.pt')
 # %%
 # Generate data
 start = torch.zeros((1, 1), dtype=torch.long, device=device)
