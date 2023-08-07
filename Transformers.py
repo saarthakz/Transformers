@@ -1,10 +1,9 @@
-# %%
 import torch
 import torch.nn as nn
 from torch.nn import functional
-from torch.utils.data import Dataset as torchDataset, DataLoader
-from tqdm.auto import tqdm
 
+
+device = 'cuda' if torch.cuda.is_available() else 'cpu'
 # %%
 # Tokenizer functions
 class ByteTokenizer:
@@ -84,7 +83,7 @@ class MultiHeadAttention(nn.Module):
         x = x.view(B, C, self.num_heads, self.head_size)
         return x.permute(0, 2, 1, 3) # B, N, C, H
 
-    def forward(self, query_input: torch.Tensor, key_input: torch.Tensor, value_input: torch.Tensor,mask = None):
+    def forward(self, query_input: torch.Tensor, key_input: torch.Tensor, value_input: torch.Tensor,mask = None, output_attention = False):
 
         B, C, D = value_input.shape
 
@@ -106,19 +105,25 @@ class MultiHeadAttention(nn.Module):
         values = values.reshape(B, C, self.emb_dim)
         values = self.value_proj(values)
 
-        return values, wei
+        if output_attention:
+            return values, wei
+
+        return values
 
 
 # %%
-# A Simple Linear Layer with ReLU for adding computational abilities
+# A Simple Linear Layer with GELU for adding computational abilities
 class FeedFoward(nn.Module):
 
-    def __init__(self, emb_dims):
+    def __init__(self, emb_dims, dropout = 0):
         super().__init__()
         self.net = nn.Sequential( 
             nn.Linear(emb_dims, 4 * emb_dims), 
-            nn.ReLU(),
+            nn.GELU(),
+            nn.Dropout(dropout),
             nn.Linear(4 * emb_dims, emb_dims),
+            nn.GELU(),
+            nn.Dropout(dropout)
         )
 
     def forward(self, x):
@@ -129,7 +134,7 @@ class FeedFoward(nn.Module):
 # Transformer Block: Communication followed by Computation 
 class Block(nn.Module):
 
-    def __init__(self, emb_dims, num_heads):
+    def __init__(self, emb_dims, num_heads, dropout = 0):
         # emb_dims: embedding dimension, num_heads: the number of heads we'd like
         super().__init__()
 
@@ -140,7 +145,7 @@ class Block(nn.Module):
         self.self_att = MultiHeadAttention(num_heads, head_size)
 
         # Computation
-        self.feed_fwd = FeedFoward(emb_dims)
+        self.feed_fwd = FeedFoward(emb_dims, dropout)
 
         # Adding Layer Normalization
         self.ln1 = nn.LayerNorm(emb_dims)
@@ -149,8 +154,7 @@ class Block(nn.Module):
 
     def forward(self, x, mask: torch.Tensor):
         # Residual connections allow the network to learn the simplest possible function. No matter how many complex layer we start by learning a linear function and the complex layers add in non linearity as needed to learn true function.
-        val, attention = self.self_att.forward(self.ln1(x), self.ln1(x), self.ln1(x), mask)
-        x = x + val
+        x = x + self.self_att.forward(self.ln1(x), self.ln1(x), self.ln1(x), mask)
         x = x + self.feed_fwd.forward(self.ln2(x))
         return x
 
@@ -234,89 +238,4 @@ class Transformer(nn.Module):
             # Appended along the context_window hence the context keeps building up
             idx = torch.cat((idx, idx_next), dim=1) # (batch_size, context_window + 1)
         return idx
-
-
-# %%
-cuda = torch.cuda.is_available()
-print(cuda, torch.cuda.get_device_name())
-
-# %%
-batch_size = 32
-context = 256
-emb_dims = 128
-print_interval = 500
-device = 'cuda' if cuda else 'cpu'
-max_iters = 5000
-epochs = 10
-
-
-# %%
-# Reading the file
-file = open('input.txt', 'r', encoding='utf-8')
-text = file.read()
-
-# %%
-# here are all the unique characters that occur in this text
-chars = sorted(list(set(text)))
-vocab_size = len(chars)
-
-# %%
-tokenizer = ByteTokenizer(chars)
-
-# %%
-class Dataset(torchDataset):
-    def __init__(self, text: str) -> None:
-      self.data = tokenizer.encode(text)
-
-    def __getitem__(self, index):
-      x = self.data[index : index + context]
-      y = self.data[index + 1 : index + context + 1]
-
-      return torch.tensor(x).to(device), torch.tensor(y).to(device)
-    def __len__(self):
-      return len(self.data) - context - 1
-
-# %%
-dataset = Dataset(text=text)
-
-# %%
-dataloader = DataLoader(dataset=dataset, batch_size=batch_size, shuffle=True)
-
-# %%
-model = Transformer(context=context, emb_dims=emb_dims, vocab_size=vocab_size).to(device=device)
-
-# Print the number of parameters in the model
-print(sum(param.numel() for param in model.parameters()) / 1e6, 'M parameters')
-
-# Create a PyTorch optimizer
-optimizer = torch.optim.AdamW(model.parameters(), lr=1e-3)
-
-# %%
-# Training loop
-
-progress_bar = tqdm(range(epochs * len(dataloader)))
-
-for epoch in range(epochs):
-    total_loss = 0
-    for step, batch in enumerate(dataloader):
-        # every once in a while evaluate the loss on train and val sets
-        if step % print_interval == 0 :
-            tqdm.write(f"step {step}: train loss {total_loss / (step + 1)}")
-
-        x, y = batch
-        # evaluate the loss
-        logits, loss = model.forward(x = x, targets =y)
-        total_loss += loss.item()
-        optimizer.zero_grad(set_to_none=True)
-        loss.backward()
-        optimizer.step()
-        progress_bar.update(1)
-
-
-torch.save(model.state_dict(), './makemore.pt')
-# %%
-# Generate data
-start = torch.zeros((1, 1), dtype=torch.long, device=device)
-open('more.txt', 'w').write(tokenizer.decode(model.generate(start, max_new_tokens=10000)[0].tolist()))
-
 
