@@ -6,7 +6,7 @@ from torchvision.utils import save_image
 from tqdm.auto import tqdm
 import argparse
 import os
-from logger import Logger
+from utils.logger import Logger
 from classes.VAE import VAE
 
 def main(args):
