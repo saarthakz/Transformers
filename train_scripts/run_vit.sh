@@ -1,4 +1,4 @@
-python trainer/vit.py \
+python trainers/vit.py \
   --mode 'test' \
   --num_test_images 10 \
   --from_checkpoint \

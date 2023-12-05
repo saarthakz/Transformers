@@ -1,4 +1,4 @@
-python trainer/train_vae.py \
+python trainers/train_vae.py \
   --mode 'train' \
   --batch_size 1000 \
   --model_dir './models/vae' \

@@ -1,9 +1,9 @@
 import torch
 import torch.nn as nn
 from torch.nn import functional
+from typing import Union
 
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
-# %%
 # Tokenizer functions
 class ByteTokenizer:
   def __init__(self, chars: 'list[str]') -> None:
@@ -29,7 +29,6 @@ class ByteTokenizer:
 
     return "".join(output)
 
-# %%
 # Single Self Attention Head
 class SelfAttentionHead(nn.Module):
 
@@ -59,8 +58,6 @@ class SelfAttentionHead(nn.Module):
         out = wei @ value # (B, C, C) @ (B, C, H) -> (B, C, H)
         return out
 
-
-# %%
 # Multiple Self Attention Heads in Parallel
 class MultiHeadAttention(nn.Module):
     
@@ -109,8 +106,6 @@ class MultiHeadAttention(nn.Module):
 
         return values
 
-
-# %%
 # A Simple Linear Layer with GELU for adding computational abilities
 class FeedFoward(nn.Module):
 
@@ -128,8 +123,6 @@ class FeedFoward(nn.Module):
     def forward(self, x):
         return self.net(x)
 
-
-# %%
 # Transformer Block: Communication followed by Computation 
 class Block(nn.Module):
 
@@ -151,14 +144,12 @@ class Block(nn.Module):
         self.ln2 = nn.LayerNorm(emb_dims)
 
 
-    def forward(self, x, mask: torch.Tensor):
+    def forward(self, x, mask: Union[torch.Tensor, None] = None):
         # Residual connections allow the network to learn the simplest possible function. No matter how many complex layer we start by learning a linear function and the complex layers add in non linearity as needed to learn true function.
         x = x + self.self_att.forward(self.ln1(x), self.ln1(x), self.ln1(x), mask)
         x = x + self.feed_fwd.forward(self.ln2(x))
         return x
 
-
-# %%
 class Transformer(nn.Module):
 
     def __init__(self, context, emb_dims, vocab_size, form = "decoder"):

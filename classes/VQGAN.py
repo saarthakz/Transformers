@@ -5,6 +5,7 @@ import torch.nn.functional as func
 class GroupNorm(nn.Module):
     def __init__(self, channels: int) -> None:
         super().__init__()
+        
         self.group_norm = nn.GroupNorm(
             num_channels=channels,
             num_groups=32,
@@ -32,17 +33,17 @@ class ResBlock(nn.Module):
             nn.Conv2d(in_channels=in_channels, out_channels=out_channels, kernel_size=(3,3), stride=1, padding=1), # This Conv2D does not change the shape of the input, only the channels
             GroupNorm(out_channels),
             Swish(),
-            nn.Conv2d(in_channels=out_channels, out_channels=out_channels, kernel_size=(3, 3), stride=1, padding=1) # This Conv2D does not change the shape of the input, including the channels
+            nn.Conv2d(in_channels=out_channels, out_channels=out_channels, kernel_size=(3, 3), stride=1, padding=1) # This Conv2D does not change the shape of the input, including the channels. Try using the Conv Attention Block here instead
         )
 
         if in_channels != out_channels:
-            self.channel_up = nn.Conv2d(in_channels=in_channels, out_channels=out_channels, kernel_size=(1, 1), stride=1, padding=0) # Used for channel matching the 'residual' input
+            self.channel_match = nn.Conv2d(in_channels=in_channels, out_channels=out_channels, kernel_size=(1, 1), stride=1, padding=0) # Used for channel matching the 'residual' input
 
     def forward(self, x):
         if self.in_channels != self.out_channels:
-            x = self.channel_up(x)
-
-        return x + self.net(x)
+            return self.channel_match(x) + self.net(x)
+        else:
+            return x + self.net(x)
     
 class UpSample(nn.Module):
     def __init__(self, channels: int) -> None:
@@ -87,7 +88,7 @@ class ConvAttention(nn.Module):
         self.proj = nn.Conv2d(in_channels=channels, out_channels=channels, kernel_size=(1,1), stride=1, padding=0)
 
     def forward(self, x):
-        gn_x = GroupNorm(x)
+        gn_x = self.group_norm(x)
 
         B, C, H, W = gn_x.shape
 
@@ -104,8 +105,8 @@ class ConvAttention(nn.Module):
         attn_score = func.softmax(attn_score, dim=-1) # (B, C, C)
 
         attn_score = attn_score @ value
-        attn_score.permute(0, 2, 3, 1)
-
+        
+        attn_score = attn_score.permute(0, 2, 1).reshape(B, C, H, W)
         return x + attn_score
 
 # Encoder as implemented in the original VQGAN Paper
@@ -113,9 +114,9 @@ class Encoder(nn.Module):
     def __init__(self, args) -> None:
         super().__init__()
 
-        channels = [128, 128, 128, 256, 256, 512]
+        channels = args.channels
 
-        layers = [nn.Conv2d(in_channels=args.image_channels, out_channels=channels[0], kernel_size=(3,3), stride=1, padding=1)] 
+        layers = [nn.Conv2d(in_channels=args.image_channels, out_channels=channels[0], kernel_size=(3,3), stride=1, padding=1)] # Same size, only number of channels changed
 
         for idx in range(len(channels) - 1):
             in_channels = channels[idx]    
@@ -147,7 +148,8 @@ class Decoder(nn.Module):
     def __init__(self, args) -> None:
         super().__init__()
 
-        channels = [512, 256, 256, 128, 128]
+        channels = args.channels
+        channels.reverse()
 
         layers = [nn.Conv2d(in_channels=args.latent_dim, out_channels=channels[0], kernel_size=(3,3), stride=1, padding=1)] 
 
@@ -176,15 +178,15 @@ class Decoder(nn.Module):
     def forward(self, x):
         return self.model(x)
 
-class Codebook(nn.Module):
+class VectorQuantizer(nn.Module):
     def __init__(self, args) -> None:
         super().__init__()
-        self.num_vecs = args.num_vecs
+        self.num_embeddings = args.num_embeddings
         self.latent_dim = args.latent_dim
-        self.beta = args.beta
+        self.beta = args.beta # Beta is a weighting factor for the "codebook gradient flowing" loss also called the commitment cost
 
-        self.embedding = nn.Embedding(num_embeddings=self.num_vecs, embedding_dim=self.latent_dim)
-        self.embedding.weight.data.uniform_(-1.0 / self.num_vecs, 1.0 / self.num_vecs) # Uniform data initialization for the codebook vectors
+        self.embedding = nn.Embedding(num_embeddings=self.num_embeddings, embedding_dim=self.latent_dim)
+        self.embedding.weight.data.uniform_(-1.0 / self.num_embeddings, 1.0 / self.num_embeddings) # Uniform data initialization for the codebook vectors
 
     def forward(self, z):
         # z is B, C, H, W
@@ -204,12 +206,13 @@ class Codebook(nn.Module):
 
         return z_q, min_encoding_indices, loss
     
+# Generator for the VQGAN
 class VQGAN(nn.Module):
     def __init__(self, args) -> None:
-        super().__init__(args)
+        super().__init__()
         self.encoder = Encoder(args).to(device=args.device)
         self.decoder = Decoder(args).to(device=args.device)
-        self.codebook = Codebook(args).to(device=args.device)  
+        self.codebook = VectorQuantizer(args).to(device=args.device)  
 
         # Defined in the VQGAN Architecture
         self.pre_quant_conv = nn.Conv2d(in_channels=args.latent_dim, out_channels=args.latent_dim, kernel_size=(1,1), stride=1, padding=0).to(device=args.device)
@@ -219,7 +222,10 @@ class VQGAN(nn.Module):
 
     def encode(self, x):
         encoded = self.encoder(x)
-        pre_quant_encoded = self.pre_quant_conv(x)
+        pre_quant_encoded = self.pre_quant_conv(encoded)
+        return pre_quant_encoded
+        
+    def through_codebook(self, pre_quant_encoded):
         codebook_mapping, codebook_indices, q_loss = self.codebook(pre_quant_encoded)
         return codebook_mapping, codebook_indices, q_loss
 
@@ -228,22 +234,37 @@ class VQGAN(nn.Module):
         decoded = self.decoder(post_quant_encoded)
         return decoded
 
+    # Combining the Encoder, Codebook and Decoder methods
     def forward(self, x):
-        codebook_mapping, codebook_indices, q_loss = self.encode(x)
-
+        pre_quant_encoded = self.encode(x)
+        codebook_mapping, codebook_indices, q_loss = self.through_codebook(pre_quant_encoded)
         decoded = self.decode(codebook_mapping)
 
         return decoded, codebook_indices, q_loss
     
-    def calculate_lambda(self, perceptual_loss, gan_loss):
-        last_layer = self.decoder.model[-1]
-        last_layer_weight = last_layer.weight
-        perceptual_loss_grads = torch.autograd.grad(perceptual_loss, last_layer_weight, retain_graph=True)[0]
-        gan_loss_grads = torch.autograd.grad(gan_loss, last_layer_weight, retain_graph=True)[0]
-
-        lmda = torch.norm(perceptual_loss_grads) / (torch.norm(gan_loss_grads) + 1e-4)
-        lmda = torch.clamp(lmda, 0, 1e4).detach()
-        return 0.8 * lmda
-
     def load_checkpoint(self, path):
         self.load_state_dict(torch.load(path))
+
+# Discriminator for the VQGAN
+class Discriminator(nn.Module):
+    def __init__(self, args, num_filters_last=64, n_layers=3):
+        super(Discriminator, self).__init__()
+
+        layers = [nn.Conv2d(args.image_channels, num_filters_last, 4, 2, 1), nn.LeakyReLU(0.2)]
+        num_filters_mult = 1
+
+        for i in range(1, n_layers + 1):
+            num_filters_mult_last = num_filters_mult
+            num_filters_mult = min(2 ** i, 8)
+            layers += [
+                nn.Conv2d(num_filters_last * num_filters_mult_last, num_filters_last * num_filters_mult, 4,
+                          2 if i < n_layers else 1, 1, bias=False),
+                nn.BatchNorm2d(num_filters_last * num_filters_mult),
+                nn.LeakyReLU(0.2, True)
+            ]
+
+        layers.append(nn.Conv2d(num_filters_last * num_filters_mult, 1, 4, 1, 1))
+        self.model = nn.Sequential(*layers)
+
+    def forward(self, x):
+        return self.model(x)
