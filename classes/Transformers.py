@@ -87,15 +87,23 @@ class MultiHeadAttention(nn.Module):
             # Default mask is the encoder mask
             mask = torch.zeros(size = (C, C)).bool().to(device=value_input.device)
 
+        print('Mask: ', mask.shape)
+
+
         # B, N, C, H in size
         query= self.split(self.query(query_input))
         key = self.split(self.key(key_input))
         value = self.split(self.value(value_input))
 
-        wei = query @ key.transpose(-2, -1) * self.head_size ** -0.5 # (B, N, C, H) @ (B, N, H, C) => (B, N, C, C)
+        print(query.shape, key.shape, value.shape)
+
+        wei = (query @ key.transpose(-2, -1)) * (self.head_size ** -0.5) # (B, N, C, H) @ (B, N, H, C) => (B, N, C, C)
+        print(wei.shape, value.shape)
 
         wei = wei.masked_fill(mask, float('-inf')) # (B, N, C, C)
         wei = functional.softmax(wei, dim=-1) # (B, N, C, C)
+
+
         values = wei @ value # (B, N, C, C) @ (B, N, C, H) -> (B, N, C, H)
         values = values.permute(0, 2, 1, 3) # (B, C, N, H)
         values = values.reshape(B, C, self.emb_dim)
@@ -170,9 +178,9 @@ class Transformer(nn.Module):
         self.position_embedding_table = nn.Embedding(context, emb_dims)
 
         self.blocks = nn.ModuleList([
-            Block(emb_dims=emb_dims, num_heads=4),
-            Block(emb_dims=emb_dims, num_heads=4),
-            Block(emb_dims=emb_dims, num_heads=4),
+            Block(emb_dims=emb_dims, num_heads=num),
+            Block(emb_dims=emb_dims, num_heads=num),
+            Block(emb_dims=emb_dims, num_heads=num),
         ])
 
         # Final layer norm

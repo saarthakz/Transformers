@@ -2,7 +2,7 @@ python trainers/train_vitvqvae.py \
   --mode 'train' \
   --batch_size 256 \
   --model_dir './models/vitvqvae' \
-  --epochs 100 \
+  --epochs 250 \
   --latent_dim 64 \
   --num_embeddings 512 \
   --image_channels 3 \

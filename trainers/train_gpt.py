@@ -20,7 +20,6 @@ device = 'cuda' if cuda else 'cpu'
 max_iters = 100
 epochs = 1
 
-
 # %%
 # Reading the file
 file = open('./data/input.txt', 'r', encoding='utf-8')
@@ -35,7 +34,6 @@ vocab_size = len(chars)
 tokenizer = ByteTokenizer(chars)
 
 # %%
-
 
 class Dataset(torchDataset):
     def __init__(self, text: str) -> None:
@@ -66,31 +64,31 @@ model = Transformer(context=context, emb_dims=emb_dims,
 print(sum(param.numel() for param in model.parameters()) / 1e6, 'M parameters')
 
 # Create a PyTorch optimizer
-optimizer = torch.optim.AdamW(model.parameters(), lr=1e-3)
+# optimizer = torch.optim.AdamW(model.parameters(), lr=1e-3)
 
-# %%
-# Training loop
+# # %%
+# # Training loop
 
-progress_bar = tqdm(range(epochs * len(dataloader)))
+# progress_bar = tqdm(range(epochs * len(dataloader)))
 
-for epoch in range(epochs):
-    total_loss = 0
-    for step, batch in enumerate(dataloader):
-        # every once in a while evaluate the loss on train and val sets
-        if step % print_interval == 0:
-            tqdm.write(f"step {step}: train loss {total_loss / (step + 1)}")
+# for epoch in range(epochs):
+#     total_loss = 0
+#     for step, batch in enumerate(dataloader):
+#         # every once in a while evaluate the loss on train and val sets
+#         if step % print_interval == 0:
+#             tqdm.write(f"step {step}: train loss {total_loss / (step + 1)}")
 
-        x, y = batch
-        # evaluate the loss
-        logits, loss = model.forward(x=x, targets=y)
-        total_loss += loss.item()
-        optimizer.zero_grad(set_to_none=True)
-        loss.backward()
-        optimizer.step()
-        progress_bar.update(1)
+#         x, y = batch
+#         # evaluate the loss
+#         logits, loss = model.forward(x=x, targets=y)
+#         total_loss += loss.item()
+#         optimizer.zero_grad(set_to_none=True)
+#         loss.backward()
+#         optimizer.step()
+#         progress_bar.update(1)
 
 
-torch.save(model.state_dict(), 'makemore.pt')
+# torch.save(model.state_dict(), './models/gpt/makemore.pt')
 # %%
 # Generate data
 start = torch.zeros((1, 1), dtype=torch.long, device=device)

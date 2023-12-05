@@ -52,8 +52,8 @@ def main(args):
     print(sum(param.numel() for param in model.parameters()) / 1e6, 'M parameters')
     optimizer = optim.AdamW(model.parameters(), lr=LR)
 
-    if args.from_checkpoint:
-        model.from_pretrained(args.checkpoint_path)
+    if args.model_from_checkpoint:
+        model.from_pretrained(args.model_checkpoint_path)
         print('Model Loaded from checkpoint')
 
     if args.mode == 'train':
@@ -132,7 +132,7 @@ def main(args):
             num_patches,
             args.latent_dim,
             args.num_embeddings
-        )
+        ).to(device=DEVICE)
 
         transformer_optim = optim.AdamW(transformer.parameters(), lr=LR)
 
@@ -161,9 +161,9 @@ def main(args):
                 target = indices 
 
                 # Start token so that the Transformer always has a token when generating
-                start_tokens = torch.ones(xs.shape[0], 1, device=x.device, dtype=torch.long) * 0
+                start_tokens = torch.ones(B, 1, device=x.device, dtype=torch.long) * 0
 
-                mask = torch.bernoulli(args.mask_prob * torch.ones(indices.shape, device=indices.device))
+                mask = torch.bernoulli(args.keep_prob * torch.ones(indices.shape, device=indices.device))
                 mask = mask.round().to(dtype=torch.int64)
 
                 random_indices = torch.randint_like(indices, low=0, high=args.num_embeddings)
@@ -182,6 +182,27 @@ def main(args):
             train_loss_log = f"Epoch: {epoch}, Train loss {total_loss / (step + 1)}"
             tqdm.write(train_loss_log)
             logger.log(train_loss_log)
+
+        torch.save(transformer.state_dict(), os.path.join(args.model_dir, 'model_gen.pt'))
+
+    if args.mode == 'generate':
+
+        num_patches = (args.image_size // args.patch_size) ** 2
+
+        transformer = Transformer(
+            num_patches,
+            args.latent_dim,
+            args.num_embeddings
+        ).to(device=DEVICE)
+
+        if args.transformer_from_checkpoint:
+            transformer.load_state_dict(torch.load(args.transformer_checkpoint_path))
+            print('Transformer loaded from checkpoint')
+
+        start_tokens = torch.ones(size=(args.num_new_images, num_patches), dtype=torch.long, device=DEVICE)
+
+        transformer.generate(start_tokens, num_patches)
+
 
 parser = argparse.ArgumentParser()
 
@@ -210,14 +231,24 @@ parser.add_argument(
     default=50
 )
 parser.add_argument(
-    '--from_checkpoint',
+    '--model_from_checkpoint',
     action='store_true',
-    help='Load from a checkpoint'
+    help='Load model from a checkpoint'
 )
 parser.add_argument(
-    '--checkpoint_path',
+    '--model_checkpoint_path',
     type=str,
-    help='Path to checkpoint path [State Dictionary]'
+    help='Path to model checkpoint path [State Dictionary]'
+)
+parser.add_argument(
+    '--transformer_from_checkpoint',
+    action='store_true',
+    help='Load transformer from a checkpoint'
+)
+parser.add_argument(
+    '--transformer_checkpoint_path',
+    type=str,
+    help='Path to transformer checkpoint path [State Dictionary]'
 )
 parser.add_argument(
     '--model_dir',
@@ -234,6 +265,12 @@ parser.add_argument(
     '--num_test_images',
     type=int,
     help='If test mode, how many images to test on',
+    default= 10
+)
+parser.add_argument(
+    '--num_new_images',
+    type=int,
+    help='If generate mode, how many images to generate',
     default= 10
 )
 parser.add_argument(
@@ -259,6 +296,12 @@ parser.add_argument(
     type=float,
     help='Dropout ',
     default=0.01
+)
+parser.add_argument(
+    '--keep_prob',
+    type=float,
+    help='Probability for codebook entries to not get masked for Stage 2 [Transformer] training',
+    default=0.5
 )
 parser.add_argument(
     '--image_channels',

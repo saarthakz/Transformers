@@ -13,3 +13,4 @@ python ./trainers/train_vitvqvae.py \
     --num_heads 4 \
     --num_blocks 2 \
     --dropout 0.01 \
+    --keep_prob 0.5

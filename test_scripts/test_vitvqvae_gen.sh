@@ -1,8 +1,10 @@
 python trainers/train_vitvqvae.py \
-    --from_checkpoint \
-    --checkpoint_path './models/vitvqvae/model.pt' \
-    --mode 'train_gen' \
-    --num_test_images 3 \
+    --model_from_checkpoint \
+    --model_checkpoint_path './models/vitvqvae/model.pt' \
+    --transformer_from_checkpoint \
+    --transformer_checkpoint_path './models/vitvqvae/model_gen.pt' \
+    --mode 'generate' \
+    --num_new_images 1 \
     --batch_size 256 \
     --model_dir './models/vitvqvae' \
     --epochs 500 \
@@ -16,5 +18,5 @@ python trainers/train_vitvqvae.py \
     --num_heads 4 \
     --num_blocks 2 \
     --dropout 0.01 \
-    --keep_prob 0.5
+    --keep_prob 0.8
 
