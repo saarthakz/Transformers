@@ -1,4 +1,3 @@
-
 import torch
 import torch.optim as optim
 import torch.nn.functional as func
@@ -20,7 +19,6 @@ def main(args):
     BATCH_SIZE = args.batch_size
     LR = args.lr
     EPOCHS = args.epochs
-    args.channels = [32, 64, 128]
 
     print(f'Device: {DEVICE}')
 
@@ -45,8 +43,6 @@ def main(args):
         args.beta
     )
     model.to(DEVICE)
-
-    # print(model)
 
     # Print the number of parameters in the model
     print(sum(param.numel() for param in model.parameters()) / 1e6, 'M parameters')
@@ -131,7 +127,8 @@ def main(args):
         transformer = Transformer(
             num_patches,
             args.latent_dim,
-            args.num_embeddings
+            args.num_embeddings,
+            args.num_heads
         ).to(device=DEVICE)
 
         transformer_optim = optim.AdamW(transformer.parameters(), lr=LR)
@@ -187,22 +184,32 @@ def main(args):
 
     if args.mode == 'generate':
 
-        num_patches = (args.image_size // args.patch_size) ** 2
+        num_patch_sqrt = (args.image_size // args.patch_size).__int__()
+        num_patches = num_patch_sqrt ** 2
 
         transformer = Transformer(
             num_patches,
             args.latent_dim,
-            args.num_embeddings
+            args.num_embeddings,
+            args.num_heads
         ).to(device=DEVICE)
 
         if args.transformer_from_checkpoint:
             transformer.load_state_dict(torch.load(args.transformer_checkpoint_path))
             print('Transformer loaded from checkpoint')
 
-        start_tokens = torch.ones(size=(args.num_new_images, num_patches), dtype=torch.long, device=DEVICE)
+        start_tokens = torch.zeros(size=(args.num_new_images, 1), dtype=torch.long, device=DEVICE)
 
-        transformer.generate(start_tokens, num_patches)
+        indices = transformer.generate(start_tokens, num_patches)[: , 1:]
 
+        z_q = model.quantize.embedding.forward(indices).view(size=(args.num_new_images, num_patch_sqrt, num_patch_sqrt, args.latent_dim)) # (B, H, W, D) 
+
+        z_q = z_q.permute(0, 3, 1, 2) # (B, D, H, W)
+
+        z_q = z_q.view(args.num_new_images, args.latent_dim, num_patches).transpose(-2, -1) # (B, D, C) -> [after transpose] -> (B, C, D)
+        recon_imgs: torch.Tensor = model.decode(z_q)
+
+        save_image(recon_imgs, fp='images/vitvqvae/gen.png')
 
 parser = argparse.ArgumentParser()
 

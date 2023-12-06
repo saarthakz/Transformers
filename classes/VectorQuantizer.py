@@ -13,9 +13,13 @@ class VectorQuantizer(nn.Module):
         self.embedding.weight.data.uniform_(-1.0 / self.num_embeddings, 1.0 / self.num_embeddings) # Uniform data initialization for the codebook vectors
 
     def forward(self, z: torch.Tensor):
-        # z is B, C, H, W
+        # z is B, D, H, W
+
         z = z.permute(0, 2, 3, 1).contiguous() # Contigous method used for memory arrangement
-        z_flat = z.view(-1, self.latent_dim) # (B * H * W, C)
+
+        # z is B, H, W, D now
+
+        z_flat = z.view(-1, self.latent_dim) # (B * H * W, D)
 
         dis = torch.sum(z_flat**2, dim=1, keepdim=True) + torch.sum(self.embedding.weight**2, dim=1) - 2*(torch.matmul(z_flat, self.embedding.weight.t())) # Calculating the distances of the encoded vectors to the codebook vectors
         
@@ -28,7 +32,7 @@ class VectorQuantizer(nn.Module):
 
         z_q = z + (z_q - z).detach() # For preserving the gradients for backprop
 
-        z_q = z_q.permute(0, 3, 1, 2) # (B, C, H, W)
+        z_q = z_q.permute(0, 3, 1, 2) # (B, D, H, W)
 
         return z_q, min_encoding_indices, loss
   

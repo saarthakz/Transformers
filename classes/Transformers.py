@@ -79,30 +79,26 @@ class MultiHeadAttention(nn.Module):
         x = x.view(B, C, self.num_heads, self.head_size)
         return x.permute(0, 2, 1, 3) # B, N, C, H
 
-    def forward(self, query_input: torch.Tensor, key_input: torch.Tensor, value_input: torch.Tensor,mask = None, output_attention = False):
+    def forward(self, query_input: torch.Tensor, key_input: torch.Tensor, value_input: torch.Tensor, mask: str = 'encoder', output_attention = False):
 
         B, C, D = value_input.shape
-
-        if mask is None:
-            # Default mask is the encoder mask
-            mask = torch.zeros(size = (C, C)).bool().to(device=value_input.device)
-
-        print('Mask: ', mask.shape)
-
 
         # B, N, C, H in size
         query= self.split(self.query(query_input))
         key = self.split(self.key(key_input))
         value = self.split(self.value(value_input))
 
-        print(query.shape, key.shape, value.shape)
+        if mask == 'encoder':
+            # Default mask is the encoder mask
+            mask = torch.zeros(size = (C, C)).bool().to(device=value_input.device)
+        else:
+            # Decoder lower left tril mask
+            mask = torch.triu(torch.full(size = (C, C), fill_value= -torch.inf), diagonal=1).bool().to(device=value_input.device)
 
         wei = (query @ key.transpose(-2, -1)) * (self.head_size ** -0.5) # (B, N, C, H) @ (B, N, H, C) => (B, N, C, C)
-        print(wei.shape, value.shape)
 
         wei = wei.masked_fill(mask, float('-inf')) # (B, N, C, C)
         wei = functional.softmax(wei, dim=-1) # (B, N, C, C)
-
 
         values = wei @ value # (B, N, C, C) @ (B, N, C, H) -> (B, N, C, H)
         values = values.permute(0, 2, 1, 3) # (B, C, N, H)
@@ -152,7 +148,7 @@ class Block(nn.Module):
         self.ln2 = nn.LayerNorm(emb_dims)
 
 
-    def forward(self, x, mask: Union[torch.Tensor, None] = None):
+    def forward(self, x, mask: str = 'encoder'):
         # Residual connections allow the network to learn the simplest possible function. No matter how many complex layer we start by learning a linear function and the complex layers add in non linearity as needed to learn true function.
         x = x + self.self_att.forward(self.ln1(x), self.ln1(x), self.ln1(x), mask)
         x = x + self.feed_fwd.forward(self.ln2(x))
@@ -160,16 +156,13 @@ class Block(nn.Module):
 
 class Transformer(nn.Module):
 
-    def __init__(self, context, emb_dims, vocab_size, form = "decoder"):
+    def __init__(self, context: int, emb_dims: int, vocab_size: int, num_heads: int, mask = "decoder"):
         super().__init__()
        
-       
-        if form == 'decoder':
-            self.mask = torch.triu(torch.full(size = (context,context), fill_value= -torch.inf), diagonal=1).bool().to(device=device)
-        else:
-            self.mask = torch.zeros(size = (context, context)).bool().to(device=device)
+        self.mask = mask
         self.context = context
         self.emb_dims = emb_dims
+        self.num_heads = num_heads
         self.vocab_size = vocab_size
 
         # Token embedding table is used for token identification encoding
@@ -178,9 +171,9 @@ class Transformer(nn.Module):
         self.position_embedding_table = nn.Embedding(context, emb_dims)
 
         self.blocks = nn.ModuleList([
-            Block(emb_dims=emb_dims, num_heads=num),
-            Block(emb_dims=emb_dims, num_heads=num),
-            Block(emb_dims=emb_dims, num_heads=num),
+            Block(emb_dims=emb_dims, num_heads=num_heads),
+            Block(emb_dims=emb_dims, num_heads=num_heads),
+            Block(emb_dims=emb_dims, num_heads=num_heads),
         ])
 
         # Final layer norm
@@ -213,7 +206,7 @@ class Transformer(nn.Module):
 
         return logits, loss
 
-    def generate(self, idx, max_new_tokens):
+    def generate(self, idx, max_new_tokens) -> torch.Tensor:
         # idx is (B, C) array of indices in the current context
         for _ in range(max_new_tokens):
 
