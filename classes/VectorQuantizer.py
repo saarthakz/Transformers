@@ -26,8 +26,8 @@ class VectorQuantizer(nn.Module):
         min_encoding_indices = torch.argmin(dis, dim=1) # Getting the indices of the min distant vector for each input
         z_q = self.embedding.forward(min_encoding_indices).view(z.shape) # Getting the codebook vectors
 
-        e_loss = func.mse_loss(z_q.detach(), z)
-        q_loss = func.mse_loss(z_q, z.detach())
+        e_loss = func.mse_loss(z_q.detach(), z) # Encoder loss
+        q_loss = func.mse_loss(z_q, z.detach()) # Quantization loss
         loss = q_loss + self.beta * e_loss
 
         z_q = z + (z_q - z).detach() # For preserving the gradients for backprop

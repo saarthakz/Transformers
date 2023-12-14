@@ -2,8 +2,9 @@ import torch
 import torch.optim as optim
 import torch.nn.functional as func
 import math
+from random import random
 from torchvision import datasets, transforms
-from torchvision.utils import save_image
+from torchvision.utils import save_image, make_grid
 from tqdm.auto import tqdm
 import argparse
 import os
@@ -105,18 +106,30 @@ def main(args):
      
     if args.mode == 'test':
         num_samples = test_dataset.__len__()
-        os.makedirs('images/vitvqvae/', exist_ok=True)
+        os.makedirs('images/vitvqvae/recon', exist_ok=True)
         indices = torch.randint(
             low = 0,
             high = num_samples,
             size = (args.num_test_images,)
         )
+
+        images = []
+        recons = []
+
         for idx in indices:
             image, target = test_dataset.__getitem__(index = idx)
-            save_image(image, f'images/vitvqvae/{idx}_{target}_true.png')
-            image = torch.unsqueeze(image, dim = 0).to(device=DEVICE)
-            recon_img,_, loss = model.forward(image)
-            save_image(recon_img, f'images/vitvqvae/{idx}_{target}.png')
+            images.append(image)
+
+        images = torch.stack(images).to(DEVICE)
+        recon_imgs, _, loss = model.forward(images)
+        
+        rand = (random() * 100).__int__()
+
+        image_fp = os.path.join('images/vitvqvae/recon', f'{rand.__str__()}_images.png')
+        recon_fp = os.path.join('images/vitvqvae/recon', f'{rand.__str__()}_recons.png')
+
+        save_image(images, fp=image_fp)
+        save_image(recon_imgs, fp=recon_fp)
 
     if args.mode == 'train_gen':
 
@@ -184,6 +197,8 @@ def main(args):
 
     if args.mode == 'generate':
 
+        os.makedirs('images/vitvqvae/gen', exist_ok=True)
+
         num_patch_sqrt = (args.image_size // args.patch_size).__int__()
         num_patches = num_patch_sqrt ** 2
 
@@ -208,8 +223,10 @@ def main(args):
 
         z_q = z_q.view(args.num_new_images, args.latent_dim, num_patches).transpose(-2, -1) # (B, D, C) -> [after transpose] -> (B, C, D)
         recon_imgs: torch.Tensor = model.decode(z_q)
-
-        save_image(recon_imgs, fp='images/vitvqvae/gen.png')
+        recon_imgs = make_grid(recon_imgs, nrow=8)
+        
+        fp = os.path.join('images/vitvqvae/gen', f'{(random() * 100).__int__().__str__()}.png')
+        save_image(recon_imgs, fp=fp)
 
 parser = argparse.ArgumentParser()
 

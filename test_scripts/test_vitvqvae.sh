@@ -2,7 +2,7 @@ python ./trainers/train_vitvqvae.py \
     --mode 'test' \
     --model_from_checkpoint \
     --model_checkpoint_path './models/vitvqvae/model.pt' \
-    --num_test_images 10 \
+    --num_test_images 64 \
     --latent_dim 128 \
     --num_embeddings 1024 \
     --image_channels 3 \

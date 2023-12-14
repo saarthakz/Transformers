@@ -14,7 +14,7 @@ class ViTVQVAE(nn.Module):
         self.encoder = ViTEncoder(image_size, patch_size, num_channels, embed_dim, num_heads, num_blocks, dropout)
         self.decoder = ViTDecoder(image_size, patch_size, num_channels, embed_dim, num_heads, num_blocks, dropout)
         self.quantize = VectorQuantizer(num_embeddings, embed_dim, beta)
-        self.prev_quant = nn.Linear(embed_dim, embed_dim)
+        self.pre_quant = nn.Linear(embed_dim, embed_dim)
         self.post_quant = nn.Linear(embed_dim, embed_dim)  
             
     def freeze(self):
@@ -24,7 +24,7 @@ class ViTVQVAE(nn.Module):
     
     def encode(self, x):
         x = self.encoder(x)
-        x = self.prev_quant(x)
+        x = self.pre_quant(x)
         return x
     
     def decode(self, x):
@@ -33,13 +33,13 @@ class ViTVQVAE(nn.Module):
         return x.clamp(-1.0, 1.0)
     
     def forward(self, x):
-        x_enc = self.encode(x)
+        x_enc = self.encode(x) # Encoder
         B, C, D  = x_enc.shape
         num_patch_sqrt = math.sqrt(C).__int__()
         x_enc = x_enc.transpose(-2, -1).view(B, D, num_patch_sqrt, num_patch_sqrt)
-        z_q, indices, loss = self.quantize.forward(x_enc)
+        z_q, indices, loss = self.quantize.forward(x_enc) # Vector Quantizer
         z_q = z_q.view(B, D, C).transpose(-2, -1)
-        recon_img: torch.Tensor = self.decode(z_q)
+        recon_img: torch.Tensor = self.decode(z_q) # Decoder
         return recon_img, indices, loss
     
     def from_pretrained(self, path):

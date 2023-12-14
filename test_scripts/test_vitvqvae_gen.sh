@@ -4,7 +4,7 @@ python trainers/train_vitvqvae.py \
     --transformer_from_checkpoint \
     --transformer_checkpoint_path './models/vitvqvae/model_gen.pt' \
     --mode 'generate' \
-    --num_new_images 2 \
+    --num_new_images 64 \
     --batch_size 256 \
     --model_dir './models/vitvqvae' \
     --epochs 500 \
