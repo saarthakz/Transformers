@@ -44,24 +44,23 @@ class SelfAttentionHead(nn.Module):
     # Input is (B, C, D) ; Output is (B, C, H)
     def forward(self, key_input: torch.Tensor, query_input: torch.Tensor, value_input: torch.Tensor, mask: torch.Tensor):
         B, C, D = key_input.shape # Batch, Context, Dimensionality
-        key: torch.Tensor =  self.key(key_input) # (B, C, D) @ (B, D, H) -> (B, C, H)
-        query: torch.Tensor = self.query(query_input) # (B, C, D) @ (B, D, H) -> (B, C, H)
-        value: torch.Tensor  = self.value(value_input) # (B, C, D) @ (B, D, H) -> (B, C, H)
-        wei: torch.Tensor =  query @ key.transpose(-2, -1) * self.head_size **-0.5 # (B, C, H) @ (B, H, C) => (B, C, C)
+        query: torch.Tensor = self.query(query_input) # (B, C_Q, D) @ (B, D, H) -> (B, C_Q, H)
+        key: torch.Tensor =  self.key(key_input) # (B, C_K, D) @ (B, D, H) -> (B, C_K, H)
+        value: torch.Tensor  = self.value(value_input) # (B, C_K, D) @ (B, D, H) -> (B, C_K, H)
+        wei: torch.Tensor =  query @ key.transpose(-2, -1) * self.head_size **-0.5 # (B, C_Q, H) @ (B, H, C_K) => (B, C, C)
         # compute attention scores ("affinities")
 
-        wei = wei.masked_fill(mask, float('-inf')) # (B, C, C)
-        wei = functional.softmax(wei, dim=-1) # (B, C, C)
+        wei = wei.masked_fill(mask, float('-inf')) # (B, C_Q, C_K)
+        wei = functional.softmax(wei, dim=-1) # (B, C_Q, C_K)
 
         # perform the weighted aggregation of the values
 
-        out = wei @ value # (B, C, C) @ (B, C, H) -> (B, C, H)
+        out = wei @ value # (B, C_Q, C_K) @ (B, C_K, H) -> (B, C_Q, H)
         return out
 
 # Multiple Self Attention Heads in Parallel
 class MultiHeadAttention(nn.Module):
     
-
     def __init__(self, num_heads: int, head_size: int):
         super().__init__()
 
@@ -81,28 +80,29 @@ class MultiHeadAttention(nn.Module):
 
     def forward(self, query_input: torch.Tensor, key_input: torch.Tensor, value_input: torch.Tensor, mask: str = 'encoder', output_attention = False):
 
-        B, C, D = value_input.shape
-
-        # B, N, C, H in size
         query= self.split(self.query(query_input))
         key = self.split(self.key(key_input))
         value = self.split(self.value(value_input))
 
+        C_query = query.shape[-2]
+        C_key = key.shape[-2]
+
         if mask == 'encoder':
             # Default mask is the encoder mask
-            mask = torch.zeros(size = (C, C)).bool().to(device=value_input.device)
+            mask = torch.zeros(size = (C_query, C_key)).bool().to(device=value_input.device)
         else:
             # Decoder lower left tril mask
-            mask = torch.triu(torch.full(size = (C, C), fill_value= -torch.inf), diagonal=1).bool().to(device=value_input.device)
+            mask = torch.triu(torch.full(size = (C_query, C_key), fill_value= -torch.inf), diagonal=1).bool().to(device=value_input.device)
 
-        wei = (query @ key.transpose(-2, -1)) * (self.head_size ** -0.5) # (B, N, C, H) @ (B, N, H, C) => (B, N, C, C)
+        wei = (query @ key.transpose(-2, -1)) * (self.head_size ** -0.5) # (B, N, C_Q, H) @ (B, N, H, C_K) => (B, N, C_Q, C_K)
 
-        wei = wei.masked_fill(mask, float('-inf')) # (B, N, C, C)
-        wei = functional.softmax(wei, dim=-1) # (B, N, C, C)
+        wei = wei.masked_fill(mask, float('-inf')) # (B, N, C_Q, C_K)
+        wei = functional.softmax(wei, dim=-1) # (B, N, C_Q, C_K)
 
-        values = wei @ value # (B, N, C, C) @ (B, N, C, H) -> (B, N, C, H)
-        values = values.permute(0, 2, 1, 3) # (B, C, N, H)
-        values = values.reshape(B, C, self.emb_dim)
+        values = wei @ value # (B, N, C_Q, C_K) @ (B, N, C_K, H) -> (B, N, C_Q, H)
+        values = values.permute(0, 2, 1, 3) # (B, C_Q, N, H)
+        B, C_values, N, H = values.shape
+        values = values.reshape(B, C_values, N * H)
         values = self.value_proj(values)
 
         if output_attention:
@@ -111,15 +111,15 @@ class MultiHeadAttention(nn.Module):
         return values
 
 # A Simple Linear Layer with GELU for adding computational abilities
-class FeedFoward(nn.Module):
+class FeedForward(nn.Module):
 
-    def __init__(self, emb_dims, dropout = 0):
+    def __init__(self, emb_dims, inner_dims, dropout = 0):
         super().__init__()
         self.net = nn.Sequential( 
-            nn.Linear(emb_dims, 4 * emb_dims), 
+            nn.Linear(emb_dims, inner_dims), 
             nn.GELU(),
             nn.Dropout(dropout),
-            nn.Linear(4 * emb_dims, emb_dims),
+            nn.Linear(inner_dims, emb_dims),
             nn.GELU(),
             nn.Dropout(dropout)
         )
@@ -141,7 +141,7 @@ class Block(nn.Module):
         self.self_att = MultiHeadAttention(num_heads, head_size)
 
         # Computation
-        self.feed_fwd = FeedFoward(emb_dims, dropout)
+        self.feed_fwd = FeedForward(emb_dims, emb_dims * 4, dropout)
 
         # Adding Layer Normalization
         self.ln1 = nn.LayerNorm(emb_dims)
