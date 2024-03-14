@@ -152,7 +152,7 @@ class ViTVQVAE_v2(nn.Module):
 
         encoder_layers = []
 
-        for idx in range(num_blocks):
+        for _ in range(num_blocks):
             encoder_layers.append(Block(embed_dim, num_heads, dropout))
             encoder_layers.append(Block(embed_dim, num_heads, dropout))
             num_patches = num_patches * 2
@@ -162,18 +162,29 @@ class ViTVQVAE_v2(nn.Module):
             encoder_layers.append(nn.Linear(embed_dim, embed_dim * 2))
             embed_dim = embed_dim * 2
 
-        self.decoder = ViTDecoder(
-            image_size,
-            patch_size,
-            num_channels,
-            embed_dim,
-            num_heads,
-            num_blocks,
-            dropout,
-        )
-        self.quantize = VectorQuantizer(num_codebook_embeddings, embed_dim, beta)
+        self.encoder = nn.Sequential(*encoder_layers)
+
         self.pre_quant = nn.Linear(embed_dim, codebook_dim)
+        self.quantize = VectorQuantizer(num_codebook_embeddings, codebook_dim, beta)
         self.post_quant = nn.Linear(codebook_dim, embed_dim)
+
+        decoder_layers = []
+
+        for _ in range(num_blocks):
+            decoder_layers.append(Block(embed_dim, num_heads, dropout))
+            decoder_layers.append(Block(embed_dim, num_heads, dropout))
+            num_patches = num_patches // 2
+            decoder_layers.append(
+                PatchModifier(dim=embed_dim, num_tokens_out=num_patches)
+            )
+            decoder_layers.append(nn.Linear(embed_dim, embed_dim // 2))
+            embed_dim = embed_dim // 2
+
+        self.decoder = nn.Sequential(*decoder_layers)
+
+        self.upscale = Upscale(num_channels, embed_dim, patch_size)
+
+        self.compression_factor = 2**num_blocks
 
     def freeze(self):
         self.eval()
@@ -192,11 +203,15 @@ class ViTVQVAE_v2(nn.Module):
         return x
 
     def forward(self, x):
+        H, W = self.image_size
+        H, W = H // self.compression_factor, W // self.compression_factor
+
         x_enc = self.encode(x)  # Encoder
         B, C, D = x_enc.shape
-        num_patch_sqrt = math.sqrt(C).__int__()
-        x_enc = x_enc.transpose(-2, -1).view(B, D, num_patch_sqrt, num_patch_sqrt)
+        x_enc = x_enc.transpose(-2, -1).view(B, D, H, W)
+
         z_q, indices, loss = self.quantize.forward(x_enc)  # Vector Quantizer
+
         z_q = z_q.view(B, D, C).transpose(-2, -1)
         recon_img: torch.Tensor = self.decode(z_q)  # Decoder
         return recon_img, indices, loss

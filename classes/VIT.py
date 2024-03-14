@@ -48,17 +48,18 @@ class PatchModifier(nn.Module):
 
     def forward(self, x):
         x = self.norm(x)
-        sim = torch.matmul(self.queries, x.transpose(1, 2))
+        sim = self.queries @ x.transpose(1, 2)
         if self.use_scale:
             sim = sim * self.scale
-        attn = torch.nn.functional.softmax(sim, dim=-1)
-        return torch.matmul(attn, x)
+        attn = functional.softmax(sim, dim=-1)
+        return attn @ x
 
 
 class Upscale(nn.Module):
     def __init__(self, num_channels: int, embed_dim: int, patch_size: int) -> None:
         super().__init__()
 
+        self.patch_size = patch_size
         self.upscale = nn.ConvTranspose2d(
             in_channels=embed_dim,
             out_channels=num_channels,
@@ -66,12 +67,13 @@ class Upscale(nn.Module):
             stride=patch_size,
         )
 
-    def forward(self, x: torch.Tensor):
+    def forward(self, x: torch.Tensor, height: int, width: int):
         B, C, D = x.shape
+
+        assert height * width == C, "Image dimensions don't match "
         x = x.transpose(1, 2)  # B, D, C
-        patch_dim = math.sqrt(C).__floor__()
-        x = x.view(B, D, patch_dim, patch_dim)
-        img = self.upscale(input=x)
+        x = x.view(B, D, height, width)
+        img = self.upscale.forward(input=x)
         return img
 
 
@@ -203,7 +205,6 @@ class ViTEncoder(nn.Module):
         self.pre_net_norm = nn.LayerNorm(embed_dim)
         self.transformer = nn.Sequential(
             *[Block(embed_dim, num_heads, dropout) for _ in range(num_blocks)]
-
         )
 
         self.initialize_weights()
@@ -282,4 +283,3 @@ class ViTDecoder(nn.Module):
         elif isinstance(m, nn.LayerNorm):
             nn.init.constant_(m.bias, 0)
             nn.init.constant_(m.weight, 1.0)
-
