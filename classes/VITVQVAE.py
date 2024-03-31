@@ -5,7 +5,7 @@ import os
 import sys
 
 sys.path.append(os.path.abspath("."))
-from classes.VectorQuantizer import VectorQuantizer
+from classes.VectorQuantizer import VectorQuantizer, VectorQuantizerEMA
 from classes.VIT import (
     ViTEncoder,
     ViTDecoder,
@@ -13,6 +13,7 @@ from classes.VIT import (
     PatchModifier,
     Upscale,
     Block,
+    ConvAttentionBlock,
 )
 
 
@@ -44,6 +45,8 @@ class ViTVQVAE(nn.Module):
         num_blocks: int,
         dropout: int,
         beta: int,
+        decay=0,
+        use_conv_attn=False,
     ):
         super().__init__()
 
@@ -55,6 +58,7 @@ class ViTVQVAE(nn.Module):
             num_heads,
             num_blocks,
             dropout,
+            use_conv_attn,
         )
         self.decoder = ViTDecoder(
             image_size,
@@ -64,8 +68,13 @@ class ViTVQVAE(nn.Module):
             num_heads,
             num_blocks,
             dropout,
+            use_conv_attn,
         )
-        self.quantize = VectorQuantizer(num_codebook_embeddings, embed_dim, beta)
+        self.quantize = (
+            VectorQuantizer(num_codebook_embeddings, codebook_dim, beta)
+            if decay == 0
+            else VectorQuantizerEMA(num_codebook_embeddings, codebook_dim, beta, decay)
+        )
         self.pre_quant = nn.Linear(embed_dim, codebook_dim)
         self.post_quant = nn.Linear(codebook_dim, embed_dim)
 
@@ -128,6 +137,8 @@ class ViTVQVAE_v2(nn.Module):
         num_blocks: int,
         dropout: int,
         beta: int,
+        decay=0,
+        use_conv_attn=False,
     ):
         super().__init__()
 
@@ -145,43 +156,79 @@ class ViTVQVAE_v2(nn.Module):
         scale = embed_dim**-0.5
         H, W = image_size
         num_patches = H * W // (patch_size**2)
+
+        patch_res = H // patch_size, W // patch_size
+
         self.position_embedding = nn.Parameter(
             torch.randn(size=(1, num_patches, embed_dim)) * scale
         )
         self.pre_encoder_norm = nn.LayerNorm(embed_dim)
 
-        encoder_layers = []
+        self.encoder_layers = nn.ModuleList()
 
         for _ in range(num_blocks):
-            encoder_layers.append(Block(embed_dim, num_heads, dropout))
-            encoder_layers.append(Block(embed_dim, num_heads, dropout))
-            num_patches = num_patches * 2
-            encoder_layers.append(
+            self.encoder_layers.append(
+                Block(embed_dim, num_heads, dropout)
+                if not use_conv_attn
+                else ConvAttentionBlock(embed_dim, patch_res, dropout)
+            )
+            self.encoder_layers.append(
+                Block(embed_dim, num_heads, dropout)
+                if not use_conv_attn
+                else ConvAttentionBlock(embed_dim, patch_res, dropout)
+            )
+            num_patches = num_patches // 4
+            H, W = patch_res
+            patch_res = H // 2, W // 2
+
+            self.encoder_layers.append(
                 PatchModifier(dim=embed_dim, num_tokens_out=num_patches)
             )
-            encoder_layers.append(nn.Linear(embed_dim, embed_dim * 2))
-            embed_dim = embed_dim * 2
+            self.encoder_layers.append(
+                nn.Linear(embed_dim, embed_dim * 4)
+                if not use_conv_attn
+                else nn.Conv2d(embed_dim, embed_dim * 2, 1, 1, 0)
+            )
+            embed_dim = embed_dim * 4
 
-        self.encoder = nn.Sequential(*encoder_layers)
+        # self.encoder = nn.Sequential(*encoder_layers)
 
         self.pre_quant = nn.Linear(embed_dim, codebook_dim)
-        self.quantize = VectorQuantizer(num_codebook_embeddings, codebook_dim, beta)
+        self.quantize = (
+            VectorQuantizer(num_codebook_embeddings, codebook_dim, beta)
+            if decay == 0
+            else VectorQuantizerEMA(num_codebook_embeddings, codebook_dim, beta, decay)
+        )
         self.post_quant = nn.Linear(codebook_dim, embed_dim)
 
-        decoder_layers = []
+        self.decoder_layers = nn.ModuleList()
 
         for _ in range(num_blocks):
-            decoder_layers.append(Block(embed_dim, num_heads, dropout))
-            decoder_layers.append(Block(embed_dim, num_heads, dropout))
-            num_patches = num_patches // 2
-            decoder_layers.append(
+            self.decoder_layers.append(
+                Block(embed_dim, num_heads, dropout)
+                if not use_conv_attn
+                else ConvAttentionBlock(embed_dim, patch_res, dropout)
+            )
+            self.decoder_layers.append(
+                Block(embed_dim, num_heads, dropout)
+                if not use_conv_attn
+                else ConvAttentionBlock(embed_dim, patch_res, dropout)
+            )
+            num_patches = num_patches * 4
+            H, W = patch_res
+            patch_res = H * 2, W * 2
+            self.decoder_layers.append(
                 PatchModifier(dim=embed_dim, num_tokens_out=num_patches)
             )
-            decoder_layers.append(nn.Linear(embed_dim, embed_dim // 2))
-            embed_dim = embed_dim // 2
+            self.decoder_layers.append(
+                nn.Linear(embed_dim, embed_dim // 4)
+                if not use_conv_attn
+                else nn.Conv2d(embed_dim, embed_dim // 2, 1, 1, 0)
+            )
+            embed_dim = embed_dim // 4
 
-        self.decoder = nn.Sequential(*decoder_layers)
-
+        # self.decoder = nn.Sequential(*decoder_layers)
+        self.post_decoder_norm = nn.LayerNorm(embed_dim)
         self.upscale = Upscale(num_channels, embed_dim, patch_size)
 
         self.compression_factor = 2**num_blocks
@@ -192,19 +239,35 @@ class ViTVQVAE_v2(nn.Module):
             param.requires_grad = False
 
     def encode(self, x):
-        x = self.encoder(x)
+        x = self.patch_embedding.forward(x)
+        x = x + self.position_embedding
+        x = self.pre_encoder_norm(x)
+        # x = self.encoder(x)
+        for layer in self.encoder_layers:
+            x = layer.forward(x)
+            # print(x.shape)
         x = self.pre_quant(x)
         return x
 
     def decode(self, x):
+        H, W = self.image_size
+        H, W = H // self.patch_size, W // self.patch_size
         x = self.post_quant(x)
-        x = self.decoder(x)
+        for layer in self.decoder_layers:
+            x = layer.forward(x)
+            # print(x.shape)
+        # x = self.decoder(x)
+        x = self.post_decoder_norm(x)
+        x = self.upscale.forward(x, H, W)
         # x = x.clamp(-1.0, 1.0)
         return x
 
     def forward(self, x):
         H, W = self.image_size
-        H, W = H // self.compression_factor, W // self.compression_factor
+        H, W = (
+            H // (self.patch_size * self.compression_factor),
+            W // (self.patch_size * self.compression_factor),
+        )
 
         x_enc = self.encode(x)  # Encoder
         B, C, D = x_enc.shape

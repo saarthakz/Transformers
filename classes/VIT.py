@@ -8,11 +8,42 @@ from torch.nn import functional
 sys.path.append(os.path.abspath("."))
 from classes.Transformers import Block, FeedForward, MultiHeadAttention
 from classes.SpectralNorm import SpectralNorm
+from classes.VQVAE import ConvAttention
+
+
+class ConvAttentionBlock(nn.Module):
+
+    def __init__(
+        self,
+        emb_dims: int,
+        input_res: tuple[int],
+        dropout=0,
+    ):
+        # emb_dims: embedding dimension, num_heads: the number of heads we'd like
+        super().__init__()
+
+        # Divide the embedding dimensions by the number of heads to get the head size
+
+        # Communication
+        self.self_att = ConvAttention(emb_dims, input_res)
+
+        # Computation
+        self.feed_fwd = FeedForward(emb_dims, emb_dims * 4, dropout)
+
+        # Adding Layer Normalization
+        self.ln1 = nn.LayerNorm(emb_dims)
+        self.ln2 = nn.LayerNorm(emb_dims)
+
+    def forward(self, x, mask: str = "encoder"):
+        # Residual connections allow the network to learn the simplest possible function. No matter how many complex layer we start by learning a linear function and the complex layers add in non linearity as needed to learn true function.
+        x = x + self.self_att.forward(self.ln1(x))
+        x = x + self.feed_fwd.forward(self.ln2(x))
+        return x
 
 
 class PatchEmbeddings(nn.Module):
     """
-    Convert the image into patches and then project them into a vector space.
+    Convert the image into non overlapping patches and then project them into a vector space.
     """
 
     def __init__(self, num_channels: int, embed_dim: int, patch_size: int):
@@ -30,10 +61,118 @@ class PatchEmbeddings(nn.Module):
             stride=self.patch_size,
         )
 
-    def forward(self, x):
+    def forward(self, x: torch.Tensor):
         # (batch_size, num_channels, image_size, image_size) -> (batch_size, num_patches, hidden_size)
-        x = self.projection(x)
+        x = self.projection.forward(x)
         x = x.flatten(-2).transpose(-2, -1)
+        return x
+
+
+class OverlappingPatchEmbedding(nn.Module):
+
+    def __init__(
+        self, input_res: int, num_channels: int, embed_dim: int, patch_size: int
+    ):
+        super().__init__()
+        self.patch_size = patch_size
+        self.num_channels = num_channels
+        self.embed_dim = embed_dim
+        self.input_res = input_res
+
+        self.merger = nn.Unfold(
+            kernel_size=self.patch_size, stride=self.patch_size // 2
+        )
+        self.proj = nn.Linear(
+            in_features=(patch_size**2) * num_channels, out_features=embed_dim
+        )
+
+    def forward(self, x: torch.Tensor):
+        x = self.merger.forward(x)
+        x = x.transpose(-2, -1)
+        x = self.proj.forward(x)
+        return x
+
+
+class OverlappingPatchUnembedding(nn.Module):
+    def __init__(
+        self, image_size: int, num_channels: int, embed_dim: int, patch_size: int
+    ):
+        super().__init__()
+        self.patch_size = patch_size
+        self.num_channels = num_channels
+        self.embed_dim = embed_dim
+        self.image_size = image_size
+
+        self.proj = nn.Linear(
+            in_features=embed_dim, out_features=(patch_size**2) * num_channels
+        )
+        self.merger = nn.Fold(
+            output_size=image_size,
+            kernel_size=patch_size,
+            stride=patch_size // 2,
+        )
+
+    def forward(self, x: torch.Tensor):
+        x = self.proj(x)
+        x = x.transpose(-2, -1)
+        x = self.merger(x)
+        return x
+
+
+class OverlappingPatchMerger(nn.Module):
+
+    def __init__(
+        self, input_res: int, in_channels: int, out_channels: int, patch_size: int
+    ):
+        super().__init__()
+        self.patch_size = patch_size
+        self.in_channels = in_channels
+        self.out_channels = out_channels
+        self.input_res = input_res
+
+        self.merger = nn.Unfold(
+            kernel_size=self.patch_size, stride=self.patch_size // 2
+        )
+        self.proj = nn.Linear(
+            in_features=(patch_size**2) * in_channels, out_features=out_channels
+        )
+
+    def forward(self, x: torch.Tensor):
+        B, C, D = x.shape
+        assert C == self.input_res**2, "Resolution Mismatch"
+        x = x.transpose(-2, -1)
+        x = x.view(B, D, self.input_res, self.input_res)
+        x = self.merger.forward(x)
+        x = x.transpose(-2, -1)
+        x = self.proj.forward(x)
+        return x
+
+
+class OverlappingPatchExpander(nn.Module):
+    def __init__(
+        self, in_channels: int, out_channels: int, patch_size: int, image_size: int
+    ):
+        super().__init__()
+        self.patch_size = patch_size
+        self.in_channels = in_channels
+        self.out_channels = out_channels
+        self.image_size = image_size
+
+        self.proj = nn.Linear(
+            in_features=in_channels, out_features=(patch_size**2) * out_channels
+        )
+        self.merger = nn.Fold(
+            output_size=image_size,
+            kernel_size=patch_size,
+            stride=patch_size // 2,
+        )
+
+    def forward(self, x: torch.Tensor):
+        B, C, D = x.shape
+        x = self.proj(x)
+        x = x.transpose(-2, -1)
+        x = self.merger(x).view(B, self.out_channels, -1)
+        x = x.transpose(-2, -1)
         return x
 
 
@@ -55,6 +194,50 @@ class PatchModifier(nn.Module):
         return attn @ x
 
 
+class PoolDownsample(nn.Module):
+    def __init__(self, input_res: tuple[int], kernel_size=3, stride=2, padding=1):
+        super().__init__()
+        self.input_res = input_res
+        self.kernel_size = kernel_size
+        self.stride = stride
+        self.padding = padding
+        self.max_pool = nn.MaxPool2d(
+            kernel_size=kernel_size, stride=stride, padding=padding
+        )
+        self.avg_pool = nn.AvgPool2d(
+            kernel_size=kernel_size, stride=stride, padding=padding
+        )
+
+    def forward(self, x: torch.Tensor):
+        B, L, C = x.shape
+        H, W = self.input_res
+        assert L == H * W, "Resolution mismatch"
+        x = x.transpose(-2, -1).view(B, C, H, W)
+        max_pool_features = self.max_pool.forward(x)
+        avg_pool_features = self.avg_pool.forward(x)
+        features = torch.cat([max_pool_features, avg_pool_features], dim=1)
+        features = features.view(B, 2 * C, -1).transpose(-2, -1)
+        return features
+
+
+class Upsample(nn.Module):
+    def __init__(self, input_res: tuple[int], dim: int):
+        super().__init__()
+        self.input_res = input_res
+        self.upsample = nn.Upsample(scale_factor=2, mode="bilinear", align_corners=True)
+        self.proj = nn.Linear(in_features=dim, out_features=dim // 2)
+
+    def forward(self, x: torch.Tensor):
+        B, L, C = x.shape
+        H, W = self.input_res
+        assert L == H * W, "Resolution mismatch"
+        x = x.transpose(-2, -1).view(B, C, H, W)
+        x = self.upsample.forward(x)
+        x = x.view(B, C, -1).transpose(-2, -1)
+        x = self.proj.forward(x)
+        return x
+
+
 class Upscale(nn.Module):
     def __init__(self, num_channels: int, embed_dim: int, patch_size: int) -> None:
         super().__init__()
@@ -70,7 +253,9 @@ class Upscale(nn.Module):
     def forward(self, x: torch.Tensor, height: int, width: int):
         B, C, D = x.shape
 
-        assert height * width == C, "Image dimensions don't match "
+        assert (
+            height * width == C
+        ), f"Image dimensions don't match; {height} * {width} != {C} "
         x = x.transpose(1, 2)  # B, D, C
         x = x.view(B, D, height, width)
         img = self.upscale.forward(input=x)
@@ -185,27 +370,38 @@ class ViTEncoder(nn.Module):
         num_heads: int,
         num_blocks: int,
         dropout: int,
+        use_conv_attn=False,
     ) -> None:
         super().__init__()
         self.image_size = image_size
         self.patch_size = patch_size
 
+        H, W = self.image_size
+
         assert (
-            image_size % patch_size == 0
+            H % patch_size == 0 and W % patch_size == 0
         ), "Image dimensions must be divisible by the patch size."
 
         self.patch_embedding = PatchEmbeddings(num_channels, embed_dim, patch_size)
 
         scale = embed_dim**-0.5
-        H, W = image_size
         num_patches = H * W // (patch_size**2)
+        patch_res = H // patch_size, W // patch_size
         self.position_embedding = nn.Parameter(
             torch.randn(size=(1, num_patches, embed_dim)) * scale
         )
         self.pre_net_norm = nn.LayerNorm(embed_dim)
-        self.transformer = nn.Sequential(
-            *[Block(embed_dim, num_heads, dropout) for _ in range(num_blocks)]
-        )
+        if use_conv_attn:
+            self.transformer = nn.Sequential(
+                *[
+                    ConvAttentionBlock(embed_dim, patch_res, dropout)
+                    for _ in range(num_blocks)
+                ]
+            )
+        else:
+            self.transformer = nn.Sequential(
+                *[Block(embed_dim, num_heads, dropout) for _ in range(num_blocks)]
+            )
 
         self.initialize_weights()
 
@@ -241,34 +437,49 @@ class ViTDecoder(nn.Module):
         num_heads: int,
         num_blocks: int,
         dropout: int,
+        use_conv_attn=False,
     ) -> None:
         super().__init__()
 
         self.image_size = image_size
         self.patch_size = patch_size
 
+        H, W = self.image_size
+
         assert (
-            image_size % patch_size == 0
+            H % patch_size == 0 and W % patch_size == 0
         ), "Image dimensions must be divisible by the patch size."
 
         scale = embed_dim**-0.5
-        num_patches = (image_size // patch_size) ** 2
+        num_patches = H * W // (patch_size**2)
+        patch_res = H // patch_size, W // patch_size
+        self.patch_res = patch_res
+
         self.position_embedding = nn.Parameter(
             torch.randn(size=(1, num_patches, embed_dim)) * scale
         )
         self.post_net_norm = nn.LayerNorm(embed_dim)
-        self.transformer = nn.Sequential(
-            *[Block(embed_dim, num_heads, dropout) for _ in range(num_blocks)]
-        )
+        if use_conv_attn:
+            self.transformer = nn.Sequential(
+                *[
+                    ConvAttentionBlock(embed_dim, patch_res, dropout)
+                    for _ in range(num_blocks)
+                ]
+            )
+        else:
+            self.transformer = nn.Sequential(
+                *[Block(embed_dim, num_heads, dropout) for _ in range(num_blocks)]
+            )
         self.proj = Upscale(num_channels, embed_dim, patch_size)
 
         self.initialize_weights()
 
     def forward(self, x):
+        H, W = self.image_size
         x = x + self.position_embedding
         x = self.transformer(x)
         x = self.post_net_norm(x)
-        x = self.proj(x)
+        x = self.proj(x, *self.patch_res)
 
         return x
 
