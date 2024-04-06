@@ -12,7 +12,7 @@ import sys
 
 sys.path.append(os.path.abspath("."))
 from utils.logger import Logger
-from classes.VITVQVAE import ViTVQVAE, ViTVQVAE_v2
+from model_classes.VITVQVAE import ViTVQVAE, ViTVQVAE_v2
 from classes.Transformers import Transformer
 
 
