@@ -1,0 +1,20 @@
+{
+    "input_res": [
+        64,
+        64
+    ],
+    "patch_size": 4,
+    "num_channels": 3,
+    "num_codebook_embeddings": 1024,
+    "codebook_dim": 32,
+    "num_layers": 1,
+    "num_heads": 4,
+    "num_blocks": 2,
+    "model_name": "",
+    "with_vq": true,
+    "gradient_accumulation_steps": 2,
+    "epochs": 1,
+    "batch_size": 256,
+    "from_checkpoint": false,
+    "num_checkpoints": 10
+}

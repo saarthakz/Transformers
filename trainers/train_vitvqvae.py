@@ -22,7 +22,7 @@ def main(args):
     BATCH_SIZE = args.batch_size
     LR = args.lr
     EPOCHS = args.epochs
-    args.image_size = tuple(map(lambda x: int(x), args.image_size.split(",")))
+    args.input_res = tuple(map(lambda x: int(x), args.input_res.split(",")))
 
     print("All arguements:\n", args)
 
@@ -35,7 +35,7 @@ def main(args):
     #     ]
     # )
     transform = transforms.Compose(
-        [transforms.ToTensor(), transforms.Resize(size=args.image_size, antialias=True)]
+        [transforms.ToTensor(), transforms.Resize(size=args.input_res, antialias=True)]
     )
 
     # test_dataset = datasets.CIFAR10(
@@ -51,7 +51,7 @@ def main(args):
     # %%
     if args.version == 1:
         model = ViTVQVAE(
-            args.image_size,
+            args.input_res,
             args.patch_size,
             args.image_channels,
             args.num_codebook_embeddings,
@@ -69,7 +69,7 @@ def main(args):
         assert args.num_blocks % 2 == 0, "If using V2, number of blocks should be even"
 
         model = ViTVQVAE_v2(
-            image_size=args.image_size,
+            input_res=args.input_res,
             patch_size=args.patch_size,
             num_channels=args.image_channels,
             num_codebook_embeddings=args.num_codebook_embeddings,
@@ -183,7 +183,7 @@ def main(args):
 
         logger = Logger(os.path.join(args.model_dir, "log_gen.txt"))
 
-        num_patches = (args.image_size // args.patch_size) ** 2
+        num_patches = (args.input_res // args.patch_size) ** 2
 
         transformer = Transformer(
             num_patches, args.latent_dim, args.num_embeddings, args.num_heads
@@ -260,7 +260,7 @@ def main(args):
 
         os.makedirs("images/vitvqvae/gen", exist_ok=True)
 
-        num_patch_sqrt = (args.image_size // args.patch_size).__int__()
+        num_patch_sqrt = (args.input_res // args.patch_size).__int__()
         num_patches = num_patch_sqrt**2
 
         transformer = Transformer(
@@ -402,7 +402,7 @@ parser.add_argument(
     required=True,
 )
 parser.add_argument(
-    "--image_size",
+    "--input_res",
     type=str,
     help="Image size/dimension",
     required=True,

@@ -226,8 +226,8 @@ class Transformer(nn.Module):
         # Final layer norm
         self.ln_f = nn.LayerNorm(emb_dims)
 
-        # Language model head used for output
-        self.lm_head = nn.Linear(emb_dims, vocab_size)
+        # Model head used for output
+        self.head = nn.Linear(emb_dims, vocab_size)
 
     def forward(self, x, targets=None):
         B, C = x.shape
@@ -241,7 +241,7 @@ class Transformer(nn.Module):
         for block in self.blocks:
             x = block(x, self.mask)
         x = self.ln_f(x)
-        logits = self.lm_head(x)
+        logits = self.head(x)
 
         if targets is None:
             loss = None

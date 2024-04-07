@@ -1,0 +1,131 @@
+{
+    "os": "Linux-5.15.90.1-microsoft-standard-WSL2-x86_64-with-glibc2.35",
+    "python": "3.11.4",
+    "heartbeatAt": "2024-04-07T12:43:59.463481",
+    "startedAt": "2024-04-07T12:43:58.541918",
+    "docker": null,
+    "cuda": null,
+    "args": [
+        "--config_file",
+        "./configs/train_config.json"
+    ],
+    "state": "running",
+    "program": "/home/saarthak/DL/trainers/vq.py",
+    "codePathLocal": "trainers/vq.py",
+    "codePath": "trainers/vq.py",
+    "git": {
+        "remote": "https://github.com/saarthakz/transformers.git",
+        "commit": "39cfec92069aa209a9816810cf2796e8287169fe"
+    },
+    "email": "zsaarthakz@gmail.com",
+    "root": "/home/saarthak/DL",
+    "host": "DESKTOP-UG3AV7I",
+    "username": "saarthak",
+    "executable": "/home/saarthak/DL/env/bin/python",
+    "cpu_count": 8,
+    "cpu_count_logical": 16,
+    "cpu_freq": {
+        "current": 3193.998,
+        "min": 0.0,
+        "max": 0.0
+    },
+    "cpu_freq_per_core": [
+        {
+            "current": 3193.998,
+            "min": 0.0,
+            "max": 0.0
+        },
+        {
+            "current": 3193.998,
+            "min": 0.0,
+            "max": 0.0
+        },
+        {
+            "current": 3193.998,
+            "min": 0.0,
+            "max": 0.0
+        },
+        {
+            "current": 3193.998,
+            "min": 0.0,
+            "max": 0.0
+        },
+        {
+            "current": 3193.998,
+            "min": 0.0,
+            "max": 0.0
+        },
+        {
+            "current": 3193.998,
+            "min": 0.0,
+            "max": 0.0
+        },
+        {
+            "current": 3193.998,
+            "min": 0.0,
+            "max": 0.0
+        },
+        {
+            "current": 3193.998,
+            "min": 0.0,
+            "max": 0.0
+        },
+        {
+            "current": 3193.998,
+            "min": 0.0,
+            "max": 0.0
+        },
+        {
+            "current": 3193.998,
+            "min": 0.0,
+            "max": 0.0
+        },
+        {
+            "current": 3193.998,
+            "min": 0.0,
+            "max": 0.0
+        },
+        {
+            "current": 3193.998,
+            "min": 0.0,
+            "max": 0.0
+        },
+        {
+            "current": 3193.998,
+            "min": 0.0,
+            "max": 0.0
+        },
+        {
+            "current": 3193.998,
+            "min": 0.0,
+            "max": 0.0
+        },
+        {
+            "current": 3193.998,
+            "min": 0.0,
+            "max": 0.0
+        },
+        {
+            "current": 3193.998,
+            "min": 0.0,
+            "max": 0.0
+        }
+    ],
+    "disk": {
+        "/": {
+            "total": 1006.853931427002,
+            "used": 44.061431884765625
+        }
+    },
+    "gpu": "NVIDIA GeForce RTX 3060",
+    "gpu_count": 1,
+    "gpu_devices": [
+        {
+            "name": "NVIDIA GeForce RTX 3060",
+            "memory_total": 12884901888
+        }
+    ],
+    "memory": {
+        "total": 7.720973968505859
+    }
+}

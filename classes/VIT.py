@@ -8,7 +8,6 @@ from torch.nn import functional
 sys.path.append(os.path.abspath("."))
 from classes.Transformers import Block, FeedForward, MultiHeadAttention
 from classes.SpectralNorm import SpectralNorm
-from classes.VQVAE import ConvAttention
 
 
 class PatchEmbeddings(nn.Module):
@@ -32,7 +31,7 @@ class PatchEmbeddings(nn.Module):
         )
 
     def forward(self, x: torch.Tensor):
-        # (batch_size, num_channels, image_size, image_size) -> (batch_size, num_patches, hidden_size)
+        # (batch_size, num_channels, input_res, input_res) -> (batch_size, num_patches, hidden_size)
         x = self.projection.forward(x)
         x = x.flatten(-2).transpose(-2, -1)
         return x
@@ -57,7 +56,7 @@ class PatchModifier(nn.Module):
 
 
 class PoolDownsample(nn.Module):
-    def __init__(self, input_res: tuple[int], kernel_size=3, stride=2, padding=1):
+    def __init__(self, input_res: list[int], kernel_size=3, stride=2, padding=1):
         super().__init__()
         self.input_res = input_res
         self.kernel_size = kernel_size
@@ -83,7 +82,7 @@ class PoolDownsample(nn.Module):
 
 
 class Upsample(nn.Module):
-    def __init__(self, input_res: tuple[int], dim: int):
+    def __init__(self, input_res: list[int], dim: int):
         super().__init__()
         self.input_res = input_res
         self.upsample = nn.Upsample(scale_factor=2, mode="bilinear", align_corners=True)
@@ -124,108 +123,10 @@ class Upscale(nn.Module):
         return img
 
 
-class VisionTransformerForClassification(nn.Module):
-
-    def __init__(
-        self,
-        image_size: int,
-        patch_size: int,
-        num_channels: int,
-        embed_dim: int,
-        num_classes: int,
-        NUM_BLOCKS=3,
-        dropout=0,
-        device="cuda",
-    ):
-        super().__init__()
-
-        self.device = device
-        self.image_size = image_size
-        self.patch_size = patch_size
-        self.num_channels = num_channels
-        self.embed_dim = embed_dim
-        self.num_classes = num_classes
-        # Num patches == Context
-        self.num_patches = (self.image_size // self.patch_size) ** 2
-        self.mask = (
-            torch.zeros(size=(self.num_patches + 1, self.num_patches + 1))
-            .bool()
-            .to(device=device)
-        )
-
-        # Token embedding table is used for token identification encoding
-        # Position embedding table is used for token position (in reference to the current context) encoding
-        self.patch_embeddings = PatchEmbeddings(
-            image_size, patch_size, num_channels, embed_dim
-        ).to(device=device)
-        self.cls_token = nn.Parameter(
-            data=torch.randn(size=(1, 1, embed_dim), device=device)
-        )
-        self.position_embedding_table = nn.Embedding(
-            self.num_patches + 1, embed_dim, device=device
-        )
-        self.blocks = nn.ModuleList(
-            [
-                Block(emb_dims=embed_dim, num_heads=4, dropout=dropout)
-                for _ in range(NUM_BLOCKS)
-            ]
-        )
-
-        # Final layer norm
-        self.ln_f = nn.LayerNorm(embed_dim)
-
-        # Language model head used for output
-        self.lm_head = nn.Linear(embed_dim, self.num_classes)
-
-    def forward(self, x, targets=None):
-        B, C, H, W = x.shape
-
-        # x and targets are both (B,C) tensor of integers
-
-        # Getting the Patch embeddings
-        patch_emb: torch.Tensor = self.patch_embeddings(x)  # (B,C,D)
-        cls_token = self.cls_token.expand(B, -1, -1)
-
-        # Added the Class token to the Patch embeddings
-        # (B, C+1, D) Added Class token
-        x = torch.concat([cls_token, patch_emb], dim=1)
-
-        B, C, D = x.shape
-
-        # Getting the position embedding for all the positions, starting from 0 -> context - 1
-        pos_emb = self.position_embedding_table(
-            torch.arange(C, device=self.device)
-        )  # (C,D)
-
-        # Adding the position embedding to the patch embeddings
-        x = x + pos_emb
-
-        for block in self.blocks:
-            x = block(x, self.mask)
-
-        x = self.ln_f(x)
-        logits = self.lm_head(x)
-        cls_logits = logits[:, 0]
-
-        if targets is None:
-            loss = None
-        else:
-            loss = functional.cross_entropy(cls_logits, targets)
-
-        return cls_logits, loss
-
-    def predict(self, x):
-        # Get the predictions
-        cls_logits, loss = self.forward(x)
-        probs = functional.softmax(cls_logits, dim=-1)
-        predictions = probs.argmax(dim=-1)
-        return predictions
-
-
 class ViTEncoder(nn.Module):
     def __init__(
         self,
-        image_size: tuple[int],
+        input_res: list[int],
         patch_size: int,
         num_channels: int,
         embed_dim: int,
@@ -234,10 +135,10 @@ class ViTEncoder(nn.Module):
         dropout: int,
     ) -> None:
         super().__init__()
-        self.image_size = image_size
+        self.input_res = input_res
         self.patch_size = patch_size
 
-        H, W = self.image_size
+        H, W = self.input_res
 
         assert (
             H % patch_size == 0 and W % patch_size == 0
@@ -248,6 +149,7 @@ class ViTEncoder(nn.Module):
         scale = embed_dim**-0.5
         num_patches = H * W // (patch_size**2)
         patch_res = H // patch_size, W // patch_size
+        self.patch_res = patch_res
         self.position_embedding = nn.Parameter(
             torch.randn(size=(1, num_patches, embed_dim)) * scale
         )
@@ -283,7 +185,7 @@ class ViTEncoder(nn.Module):
 class ViTDecoder(nn.Module):
     def __init__(
         self,
-        image_size: int,
+        input_res: list[int],
         patch_size: int,
         num_channels: int,
         embed_dim: int,
@@ -293,10 +195,10 @@ class ViTDecoder(nn.Module):
     ) -> None:
         super().__init__()
 
-        self.image_size = image_size
+        self.input_res = input_res
         self.patch_size = patch_size
 
-        H, W = self.image_size
+        H, W = self.input_res
 
         assert (
             H % patch_size == 0 and W % patch_size == 0
@@ -320,7 +222,7 @@ class ViTDecoder(nn.Module):
         self.initialize_weights()
 
     def forward(self, x):
-        H, W = self.image_size
+        H, W = self.input_res
         x = x + self.position_embedding
         x = self.transformer(x)
         x = self.post_net_norm(x)

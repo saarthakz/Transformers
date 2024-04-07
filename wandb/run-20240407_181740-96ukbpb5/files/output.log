@@ -1,0 +1,37 @@
+
+Files already downloaded and verified
+2.101283 M parameters
+Total steps: 636 and checkpoint every 212 steps
+  0%|                                                                                                                                                    | 0/636 [00:00<?, ?it/s]Traceback (most recent call last):
+  File "/home/saarthak/DL/trainers/vq.py", line 148, in <module>
+    main(config)
+  File "/home/saarthak/DL/trainers/vq.py", line 108, in main
+    recon, codebook_indices, q_loss = model.forward(x)
+                                      ^^^^^^^^^^^^^^^^
+  File "/home/saarthak/DL/env/lib/python3.11/site-packages/torch/nn/parallel/distributed.py", line 1521, in forward
+    else self._run_ddp_forward(*inputs, **kwargs)
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/saarthak/DL/env/lib/python3.11/site-packages/torch/nn/parallel/distributed.py", line 1357, in _run_ddp_forward
+    return self.module(*inputs, **kwargs)  # type: ignore[index]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/saarthak/DL/env/lib/python3.11/site-packages/torch/nn/modules/module.py", line 1518, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/saarthak/DL/env/lib/python3.11/site-packages/torch/nn/modules/module.py", line 1527, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/saarthak/DL/env/lib/python3.11/site-packages/accelerate/utils/operations.py", line 825, in forward
+    return model_forward(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/saarthak/DL/env/lib/python3.11/site-packages/accelerate/utils/operations.py", line 813, in __call__
+    return convert_to_fp32(self.model_forward(*args, **kwargs))
+                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/saarthak/DL/env/lib/python3.11/site-packages/torch/amp/autocast_mode.py", line 16, in decorate_autocast
+    return func(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "/home/saarthak/DL/model_classes/VIT_PoolDownsample_BilinearUpsample.py", line 91, in forward
+    z_q, indices, loss = self.quantize(x_enc)  # Vector Quantizer
+                         ^^^^^^^^^^^^^^^^^^^^
+  File "/home/saarthak/DL/model_classes/VIT_PoolDownsample_BilinearUpsample.py", line 82, in quantize
+    C == patch_H * patch_W
+AssertionError: Input patch length does not match the patch resolution

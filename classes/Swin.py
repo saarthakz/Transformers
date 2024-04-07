@@ -65,8 +65,8 @@ def window_combination(windows, window_size, H, W):
     return x
 
 
-def res_scaler(input_resolution: tuple[int], factor: int):
-    H, W = input_resolution
+def res_scaler(input_res: list[int], factor: float):
+    H, W = input_res
     H, W = H * factor, W * factor
     return (int(H), int(W))
 
@@ -271,7 +271,7 @@ class SingleSwinBlock(nn.Module):
 
     Args:
         dim (int): Number of input channels
-        input_resolution (tuple[int]): Input resolution, after patchifying
+        input_res (list[int]): Input resolution, after patchifying
         num_heads (int): Number of attention heads
         window_size (int): Window size
         shift_size (int): Shift size for SW-MSA
@@ -288,7 +288,7 @@ class SingleSwinBlock(nn.Module):
     def __init__(
         self,
         dim: int,
-        input_resolution: tuple[int],
+        input_res: list[int],
         num_heads: int,
         window_size=4,
         shift_size=0,
@@ -302,16 +302,16 @@ class SingleSwinBlock(nn.Module):
     ):
         super().__init__()
         self.dim = dim
-        self.input_resolution = input_resolution
+        self.input_res = input_res
         self.num_heads = num_heads
         self.window_size = window_size
         self.shift_size = shift_size
         self.mlp_ratio = mlp_ratio
 
-        # If window_size > input_resolution, no partition
-        if min(self.input_resolution) <= self.window_size:
+        # If window_size > input_res, no partition
+        if min(self.input_res) <= self.window_size:
             self.shift_size = 0
-            self.window_size = min(self.input_resolution)
+            self.window_size = min(self.input_res)
         assert (
             0 <= self.shift_size < self.window_size
         ), "shift_size must in 0-window_size"
@@ -344,7 +344,7 @@ class SingleSwinBlock(nn.Module):
         # This handling of attention-mask is my favorite part. What a beautiful implementation.
         if self.shift_size > 0:
             H, W = (
-                self.input_resolution
+                self.input_res
             )  # H, W are the patch dimensions, not the pixel dimensions
 
             # To match the dimension for window_partition function
@@ -386,7 +386,7 @@ class SingleSwinBlock(nn.Module):
         self.register_buffer("attn_mask", attn_mask)
 
     def forward(self, x):
-        H, W = self.input_resolution
+        H, W = self.input_res
         B, L, C = x.shape
         assert L == H * W, f"Input feature has wrong size; {L} is not equal {H}*{W}"
 
@@ -436,7 +436,7 @@ class MultiSwinBlock(nn.Module):
 
     Args:
         dim (int): Number of input channels
-        input_resolution (tuple[int]): Input resolution
+        input_res (list[int]): Input resolution
         depth (int): Number of blocks (depending on Swin Version - T, L, ..)
         num_heads (int): Number of attention heads
         window_size (int): Local window size
@@ -452,7 +452,7 @@ class MultiSwinBlock(nn.Module):
     def __init__(
         self,
         dim: int,
-        input_resolution: int,
+        input_res: list[int],
         depth: int,
         num_heads: int,
         window_size: int,
@@ -462,11 +462,10 @@ class MultiSwinBlock(nn.Module):
         drop=0.0,
         attn_drop=0.0,
         norm_layer=nn.LayerNorm,
-        patch_layer=None,
     ):
         super().__init__()
         self.dim = dim
-        self.input_resolution = input_resolution
+        self.input_res = input_res
         self.depth = depth
 
         # Build  Swin Transformer Blocks
@@ -474,7 +473,7 @@ class MultiSwinBlock(nn.Module):
             *[
                 SingleSwinBlock(
                     dim=dim,
-                    input_resolution=input_resolution,
+                    input_res=input_res,
                     num_heads=num_heads,
                     window_size=window_size,
                     shift_size=0 if (idx % 2 == 0) else window_size // 2,
@@ -489,17 +488,6 @@ class MultiSwinBlock(nn.Module):
             ]
         )
 
-        # Patch Merging Layer
-        if patch_layer is None:
-            self.patch_layer = None
-        elif patch_layer == PatchMerge:
-            self.patch_layer = patch_layer(input_resolution, dim, dim * 2, 2)
-        elif patch_layer == PatchExpand:
-            self.patch_layer = patch_layer(input_resolution, dim, dim // 2, 2)
-
     def forward(self, x: torch.Tensor):
         x = self.blocks.forward(x)
-
-        if self.patch_layer is not None:
-            x = self.patch_layer(x)
         return x

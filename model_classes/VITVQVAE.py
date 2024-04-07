@@ -15,7 +15,7 @@ from classes.VIT import (
 class ViTVQVAE(nn.Module):
     """
     Args:
-        image_size (tuple[int]): Image size as (H, W),
+        input_res (list[int]): Image size as (H, W),
         patch_size (int): Patch size,
         num_channels (int): Number of input image channels,
         embed_dim (int): Initial Patch embedding dimension,
@@ -30,7 +30,7 @@ class ViTVQVAE(nn.Module):
 
     def __init__(
         self,
-        image_size: int,
+        input_res: list[int],
         patch_size: int,
         num_channels: int,
         num_codebook_embeddings: int,
@@ -46,7 +46,7 @@ class ViTVQVAE(nn.Module):
         super().__init__()
 
         self.encoder = ViTEncoder(
-            image_size,
+            input_res,
             patch_size,
             num_channels,
             embed_dim,
@@ -55,7 +55,7 @@ class ViTVQVAE(nn.Module):
             dropout,
         )
         self.decoder = ViTDecoder(
-            image_size,
+            input_res,
             patch_size,
             num_channels,
             embed_dim,
@@ -63,7 +63,7 @@ class ViTVQVAE(nn.Module):
             num_blocks,
             dropout,
         )
-        self.quantize = (
+        self.quantizer = (
             VectorQuantizer(num_codebook_embeddings, codebook_dim, beta)
             if decay == 0
             else VectorQuantizerEMA(num_codebook_embeddings, codebook_dim, beta, decay)
@@ -76,26 +76,36 @@ class ViTVQVAE(nn.Module):
         for param in self.parameters():
             param.requires_grad = False
 
-    def encode(self, x):
+    def encode(self, x: torch.Tensor):
         x = self.encoder(x)
         x = self.pre_quant(x)
         return x
 
-    def decode(self, x):
+    def decode(self, x: torch.Tensor):
         x = self.post_quant(x)
         x = self.decoder(x)
         # x = x.clamp(-1.0, 1.0)
         return x
 
-    def forward(self, x):
-        x_enc = self.encode(x)  # Encoder
+    def quantize(self, x_enc: torch.Tensor):
         B, C, D = x_enc.shape
-        num_patch_sqrt = math.sqrt(C).__int__()
-        x_enc = x_enc.transpose(-2, -1).view(B, D, num_patch_sqrt, num_patch_sqrt)
-        z_q, indices, loss = self.quantize.forward(x_enc)  # Vector Quantizer
-        z_q = z_q.view(B, D, C).transpose(-2, -1)
-        recon_img: torch.Tensor = self.decode(z_q)  # Decoder
-        return recon_img, indices, loss
+        patch_H, patch_W = self.encoder.patch_res
 
-    def from_pretrained(self, path):
-        return self.load_state_dict(torch.load(path))
+        assert (
+            C == patch_H * patch_W
+        ), "Input patch length does not match the patch resolution"
+
+        x_enc = x_enc.transpose(-2, -1).view(B, D, patch_H, patch_W)
+        z_q, indices, loss = self.quantizer.forward(x_enc)  # Vector Quantizer
+        z_q = z_q.view(B, D, C).transpose(-2, -1)
+        return z_q, indices, loss
+
+    def forward(self, x: torch.Tensor):
+        x_enc = self.encode(x)  # Encoder
+        z_q, indices, loss = self.quantize(x_enc)  # Vector Quantizer
+        recon_imgs = self.decode(z_q)  # Decoder
+        return recon_imgs, indices, loss
+
+    def get_recons(self, x: torch.Tensor):
+        recon_imgs, _, _ = self.forward(x)
+        return recon_imgs
