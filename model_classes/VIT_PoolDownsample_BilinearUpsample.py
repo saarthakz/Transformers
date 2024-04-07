@@ -12,7 +12,8 @@ from classes.VIT import (
     Upsample,
 )
 from classes.VectorQuantizer import VectorQuantizerEMA
-from classes.Swin import res_scaler
+from classes.Swin import res_scaler, MultiSwinBlock
+from classes.SPT import ShiftedPatchEmbeddings
 import math
 
 
@@ -26,12 +27,21 @@ class ViT_PoolDownsample_BilinearUpsample(nn.Module):
         num_codebook_embeddings=1024,
         codebook_dim=32,
         num_layers=2,
+        with_swin=False,
+        with_shifted_patch_embeddings=False,
+        num_heads=2,
         **kwargs
     ):
         super().__init__()
 
+        self.with_swin = with_swin
+        self.with_shifted_patch_embeddings = with_shifted_patch_embeddings
         self.num_layers = num_layers
-        self.patch_embedding = PatchEmbeddings(num_channels, dim, patch_size)
+        self.patch_embedding = (
+            ShiftedPatchEmbeddings(num_channels, dim, patch_size)
+            if with_shifted_patch_embeddings
+            else PatchEmbeddings(num_channels, dim, patch_size)
+        )
         self.encoder = nn.ModuleList()
         self.decoder = nn.ModuleList()
 
@@ -40,6 +50,8 @@ class ViT_PoolDownsample_BilinearUpsample(nn.Module):
 
         # Encoder Layers
         for _ in range(self.num_layers):
+            if with_swin:
+                self.encoder.append(MultiSwinBlock(dim, res, 2, num_heads))
             self.encoder.append(Block(dim, 4))
             self.encoder.append(Block(dim, 4))
             self.encoder.append(PoolDownsample(res))
@@ -52,6 +64,8 @@ class ViT_PoolDownsample_BilinearUpsample(nn.Module):
 
         # Decoder Layers
         for _ in range(self.num_layers):
+            if with_swin:
+                self.decoder.append(MultiSwinBlock(dim, res, 2, num_heads))
             self.decoder.append(Block(dim, 4))
             self.decoder.append(Block(dim, 4))
             self.decoder.append(Upsample(res, dim))

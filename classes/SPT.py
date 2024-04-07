@@ -22,21 +22,18 @@ class PatchShiftAugmentation(nn.Module):
         return torch.cat([x, x_lu, x_ru, x_lb, x_rb], dim=-3)
 
 
-class ShiftedPatchEmbedding(nn.Module):
+class ShiftedPatchEmbeddings(nn.Module):
     def __init__(
         self,
         num_channels,
         embed_dim,
         patch_size=2,
-        is_pe=False,
     ):
         super().__init__()
 
         self.patch_shift_augmentation = PatchShiftAugmentation(patch_size)
 
         patch_dim = (num_channels * 5) * (patch_size**2)
-
-        self.is_pe = is_pe
 
         self.patch_embedding = nn.Sequential(
             Rearrange(
@@ -49,12 +46,6 @@ class ShiftedPatchEmbedding(nn.Module):
         )
 
     def forward(self, x):
-
-        out = (
-            x
-            if self.is_pe
-            else rearrange(x, "b (h w) d -> b d h w", h=int(math.sqrt(x.size(1))))
-        )
 
         out = self.patch_shift_augmentation(out)
         out = self.patch_embedding(out)

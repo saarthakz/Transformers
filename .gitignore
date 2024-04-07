@@ -2,8 +2,7 @@
 data
 _.ipynb
 env
-__pycache__
 models
-log.txt
 images
 **/__pycache__
+**/*.zip

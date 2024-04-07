@@ -10,6 +10,8 @@
     "num_layers": 1,
     "num_heads": 4,
     "num_blocks": 2,
+    "with_swin": false,
+    "with_shifted_patch_embeddings": false,
     "model_name": "",
     "with_vq": true,
     "gradient_accumulation_steps": 2,

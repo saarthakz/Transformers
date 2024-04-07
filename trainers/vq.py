@@ -26,18 +26,18 @@ def main(config: dict):
     ddp_kwargs = DistributedDataParallelKwargs(find_unused_parameters=True)
     accelerator = Accelerator(
         project_dir=model_dir,
-        # log_with="wandb",
+        log_with="wandb",
         gradient_accumulation_steps=config["gradient_accumulation_steps"],
         kwargs_handlers=[ddp_kwargs],
     )
 
-    # accelerator.init_trackers(
-    #     project_name="Major Project",
-    #     config=config,
-    #     init_kwargs={
-    #         "wandb": {"name": model_name},
-    #     },
-    # )
+    accelerator.init_trackers(
+        project_name="Major Project",
+        config=config,
+        init_kwargs={
+            "wandb": {"name": model_name},
+        },
+    )
 
     if accelerator.is_main_process:
         os.makedirs(name=model_dir, exist_ok=True)
