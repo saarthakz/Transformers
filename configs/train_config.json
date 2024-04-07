@@ -11,6 +11,7 @@
     "num_heads": 4,
     "num_blocks": 2,
     "with_swin": false,
+    "window_size": 4,
     "with_shifted_patch_embeddings": false,
     "model_name": "",
     "with_vq": true,

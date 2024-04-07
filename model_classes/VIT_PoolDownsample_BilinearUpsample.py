@@ -28,8 +28,9 @@ class ViT_PoolDownsample_BilinearUpsample(nn.Module):
         codebook_dim=32,
         num_layers=2,
         with_swin=False,
-        with_shifted_patch_embeddings=False,
         num_heads=2,
+        window_size=4,
+        with_shifted_patch_embeddings=False,
         **kwargs
     ):
         super().__init__()
@@ -51,7 +52,7 @@ class ViT_PoolDownsample_BilinearUpsample(nn.Module):
         # Encoder Layers
         for _ in range(self.num_layers):
             if with_swin:
-                self.encoder.append(MultiSwinBlock(dim, res, 2, num_heads))
+                self.encoder.append(MultiSwinBlock(dim, res, 2, num_heads, window_size))
             self.encoder.append(Block(dim, 4))
             self.encoder.append(Block(dim, 4))
             self.encoder.append(PoolDownsample(res))
@@ -65,7 +66,7 @@ class ViT_PoolDownsample_BilinearUpsample(nn.Module):
         # Decoder Layers
         for _ in range(self.num_layers):
             if with_swin:
-                self.decoder.append(MultiSwinBlock(dim, res, 2, num_heads))
+                self.decoder.append(MultiSwinBlock(dim, res, 2, num_heads, window_size))
             self.decoder.append(Block(dim, 4))
             self.decoder.append(Block(dim, 4))
             self.decoder.append(Upsample(res, dim))

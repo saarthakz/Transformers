@@ -6,3 +6,4 @@ models
 images
 **/__pycache__
 **/*.zip
+wandb
