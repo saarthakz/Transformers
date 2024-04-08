@@ -19,25 +19,27 @@ from model_classes.VIT_PoolDownsample_BilinearUpsample import (
 
 
 def main(config: dict):
-
     model_name = config["model_name"]
     model_dir = os.path.join(os.getcwd(), "models", model_name)
 
     ddp_kwargs = DistributedDataParallelKwargs(find_unused_parameters=True)
     accelerator = Accelerator(
         project_dir=model_dir,
-        # log_with="wandb",
+        log_with="wandb",
         gradient_accumulation_steps=config["gradient_accumulation_steps"],
         kwargs_handlers=[ddp_kwargs],
     )
 
-    # accelerator.init_trackers(
-    #     project_name="Major Project",
-    #     config=config,
-    #     init_kwargs={
-    #         "wandb": {"name": model_name},
-    #     },
-    # )
+    # Print the config file
+    accelerator.print(config)
+
+    accelerator.init_trackers(
+        project_name="Major Project",
+        config=config,
+        init_kwargs={
+            "wandb": {"name": model_name},
+        },
+    )
 
     if accelerator.is_main_process:
         os.makedirs(name=model_dir, exist_ok=True)
@@ -158,5 +160,4 @@ if __name__ == "__main__":
     args = vars(arg_parser.parse_args())
     config_file = open(file=args["config_file"], mode="r")
     config = json.load(config_file)
-    print(config)
     main(config)
