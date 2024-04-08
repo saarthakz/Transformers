@@ -37,8 +37,9 @@ class PatchEmbeddings(nn.Module):
         return x
 
 
+# Extrapolation of the PatchMerger by Google
 class PatchModifier(nn.Module):
-    def __init__(self, dim, num_tokens_out, use_scale=True):
+    def __init__(self, dim: int, num_tokens_out: int, use_scale=True):
         super().__init__()
         self.use_scale = use_scale
         if self.use_scale:
@@ -46,7 +47,7 @@ class PatchModifier(nn.Module):
         self.norm = nn.LayerNorm(dim, eps=1e-5)
         self.queries = nn.Parameter(torch.randn(num_tokens_out, dim))
 
-    def forward(self, x):
+    def forward(self, x: torch.Tensor):
         x = self.norm(x)
         sim = self.queries @ x.transpose(1, 2)
         if self.use_scale:
