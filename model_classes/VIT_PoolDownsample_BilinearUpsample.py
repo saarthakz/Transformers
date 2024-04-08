@@ -176,7 +176,7 @@ class ViT_SS_PoolDown_BilinUp(nn.Module):
                 )
             self.encoder.append(Block(dim, 4))
             self.encoder.append(Block(dim, 4))
-            self.encoder.append((res))
+            self.encoder.append(SS_PoolDownsample(res, dim, dim * 2))
             dim = dim * 2
             res = res_scaler(res, 0.5)
 
@@ -192,7 +192,7 @@ class ViT_SS_PoolDown_BilinUp(nn.Module):
                 )
             self.decoder.append(Block(dim, 4))
             self.decoder.append(Block(dim, 4))
-            self.decoder.append(Upsample(res, dim))
+            self.decoder.append(SS_BilinearUpsample(res, dim, dim // 2))
 
             dim = dim // 2
             res = res_scaler(res, 2)
