@@ -15,6 +15,7 @@ import argparse
 import json
 from model_classes.VIT_PoolDownsample_BilinearUpsample import (
     ViT_PoolDownsample_BilinearUpsample,
+    ViT_SS_PoolDown_BilinUp,
 )
 
 
@@ -74,7 +75,7 @@ def main(config: dict):
     train_loader = accelerator.prepare_data_loader(data_loader=train_loader)
 
     # Model
-    model = ViT_PoolDownsample_BilinearUpsample(**config)
+    model = ViT_SS_PoolDown_BilinUp(**config)
 
     if config["model_from_checkpoint"]:
         model.load_state_dict(torch.load(f=config["model_checkpoint_path"]))
