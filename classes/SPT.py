@@ -47,7 +47,7 @@ class ShiftedPatchEmbeddings(nn.Module):
 
     def forward(self, x):
 
-        out = self.patch_shift_augmentation(out)
+        out = self.patch_shift_augmentation(x)
         out = self.patch_embedding(out)
 
         return out

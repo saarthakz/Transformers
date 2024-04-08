@@ -35,10 +35,13 @@ def main(config: dict):
     accelerator.print(config)
 
     accelerator.init_trackers(
-        project_name="Major Project",
+        project_name="Major-Project",
         config=config,
         init_kwargs={
-            "wandb": {"name": model_name},
+            "wandb": {
+                "name": model_name,
+                "entity": "tangentmay"
+            },
         },
     )
 
