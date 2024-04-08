@@ -26,18 +26,18 @@ def main(config: dict):
     ddp_kwargs = DistributedDataParallelKwargs(find_unused_parameters=True)
     accelerator = Accelerator(
         project_dir=model_dir,
-        log_with="wandb",
+        # log_with="wandb",
         gradient_accumulation_steps=config["gradient_accumulation_steps"],
         kwargs_handlers=[ddp_kwargs],
     )
 
-    accelerator.init_trackers(
-        project_name="Major Project",
-        config=config,
-        init_kwargs={
-            "wandb": {"name": model_name},
-        },
-    )
+    # accelerator.init_trackers(
+    #     project_name="Major Project",
+    #     config=config,
+    #     init_kwargs={
+    #         "wandb": {"name": model_name},
+    #     },
+    # )
 
     if accelerator.is_main_process:
         os.makedirs(name=model_dir, exist_ok=True)
@@ -73,6 +73,13 @@ def main(config: dict):
 
     # Model
     model = ViT_PoolDownsample_BilinearUpsample(**config)
+
+    if config["model_from_checkpoint"]:
+        model.load_state_dict(torch.load(f=config["model_checkpoint_path"]))
+        accelerator.print(
+            "Model loaded from checkpoint: ", config["model_checkpoint_path"]
+        )
+
     model = accelerator.prepare_model(model=model)
 
     # Print # of model parameters
@@ -81,12 +88,15 @@ def main(config: dict):
     )
 
     # Optimizers
-    optim = torch.optim.Adam(model.parameters())
+    optim = torch.optim.AdamW(model.parameters(), lr=config["lr"])
     optim = accelerator.prepare_optimizer(optimizer=optim)
 
-    # Load from checkpoint if required
-    if config["from_checkpoint"]:
-        accelerator.load_state(input_dir=config["vq_checkpoint_dir"])
+    # Load a state from checkpoint if required
+    if config["state_from_checkpoint"]:
+        accelerator.load_state(input_dir=config["state_checkpoint_path"])
+        accelerator.print(
+            "State loaded from checkpoint: ", config["state_checkpoint_path"]
+        )
 
     total_steps = epochs * len(train_loader)
     checkpoint_step = total_steps // config["num_checkpoints"]
@@ -99,6 +109,7 @@ def main(config: dict):
 
     total_steps = 0
     total_loss = 0
+
     for epoch in range(epochs):
         epoch_loss = 0
         for step, batch in enumerate(train_loader):
@@ -119,7 +130,8 @@ def main(config: dict):
 
                 if total_steps % checkpoint_step == 0:
                     accelerator.save_state(
-                        os.path.join(model_dir, "checkpoints", f"{total_steps}")
+                        os.path.join(model_dir, "checkpoints", f"{total_steps}"),
+                        safe_serialization=False,
                     )
 
                 if accelerator.is_main_process:
@@ -132,7 +144,7 @@ def main(config: dict):
 
     accelerator.wait_for_everyone()
     accelerator.end_training()
-    accelerator.save_state(os.path.join(model_dir, "checkpoints", f"{total_steps}"))
+    accelerator.save_model(model, os.path.join(model_dir), safe_serialization=False)
 
 
 if __name__ == "__main__":
