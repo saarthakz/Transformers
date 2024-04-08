@@ -10,6 +10,63 @@ from classes.Transformers import Block, FeedForward, MultiHeadAttention
 from classes.SpectralNorm import SpectralNorm
 
 
+class OverlappingPatchEmbedding(nn.Module):
+
+    def __init__(
+        self, input_res: int, num_channels: int, embed_dim: int, patch_size: int
+    ):
+        super().__init__()
+        
+        assert patch_size % 4 == 0, "Patch size must be a multiple of 4"
+
+        self.patch_size = patch_size
+        self.num_channels = num_channels
+        self.embed_dim = embed_dim
+        self.input_res = input_res
+
+        self.merger = nn.Unfold(
+            kernel_size=self.patch_size, 
+            stride=self.patch_size // 2, 
+            padding=self.patch_size // 4,
+        )
+        self.proj = nn.Linear(
+            in_features=(patch_size**2) * num_channels, out_features=embed_dim
+        )
+
+    def forward(self, x: torch.Tensor):
+        x = self.merger.forward(x)
+        x = x.transpose(-2, -1)
+        x = self.proj.forward(x)
+        return x
+
+
+class OverlappingPatchUnembedding(nn.Module):
+    def __init__(
+        self, image_size: int, num_channels: int, embed_dim: int, patch_size: int
+    ):
+        super().__init__()
+        self.patch_size = patch_size
+        self.num_channels = num_channels
+        self.embed_dim = embed_dim
+        self.image_size = image_size
+
+        self.proj = nn.Linear(
+            in_features=embed_dim, out_features=(patch_size**2) * num_channels
+        )
+        self.merger = nn.Fold(
+            output_size=image_size,
+            kernel_size=patch_size,
+            stride=patch_size // 2,
+            padding=patch_size // 4,
+        )
+
+    def forward(self, x: torch.Tensor):
+        x = self.proj(x)
+        x = x.transpose(-2, -1)
+        x = self.merger(x)
+        return x
+
+
 class PatchEmbeddings(nn.Module):
     """
     Convert the image into non overlapping patches and then project them into a vector space.
