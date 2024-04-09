@@ -21,6 +21,7 @@ from model_classes.VIT_PatchModifier import (
     ViT_PatchMergeExpand,
     ViT_OverlapPatchMergeExpand,
 )
+from model_classes.VITVQVAE import SwinViTVQVAE
 import wandb
 
 
@@ -60,6 +61,10 @@ def main(config: dict):
             transforms.ToTensor(),
             transforms.CenterCrop(size=(178, 178)),
             transforms.Resize(size=(64, 64), antialias=True),
+            transforms.Normalize(
+                mean=[0.5084, 0.4224, 0.3767],
+                std=[0.3012, 0.2788, 0.2773],
+            ),
         ]
     )
 
@@ -79,7 +84,7 @@ def main(config: dict):
     train_loader = accelerator.prepare_data_loader(data_loader=train_loader)
 
     # Model
-    model = ViT_PatchMergeExpand(**config)
+    model = SwinViTVQVAE(**config)
 
     # Print # of model parameters
     accelerator.print(

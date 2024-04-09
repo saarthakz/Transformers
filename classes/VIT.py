@@ -8,6 +8,7 @@ from torch.nn import functional
 sys.path.append(os.path.abspath("."))
 from classes.Transformers import Block, FeedForward, MultiHeadAttention
 from classes.SpectralNorm import SpectralNorm
+from classes.Swin import MultiSwinBlock
 
 
 class OverlappingPatchEmbedding(nn.Module):
@@ -16,7 +17,7 @@ class OverlappingPatchEmbedding(nn.Module):
         self, input_res: int, num_channels: int, embed_dim: int, patch_size: int
     ):
         super().__init__()
-        
+
         assert patch_size % 4 == 0, "Patch size must be a multiple of 4"
 
         self.patch_size = patch_size
@@ -25,8 +26,8 @@ class OverlappingPatchEmbedding(nn.Module):
         self.input_res = input_res
 
         self.merger = nn.Unfold(
-            kernel_size=self.patch_size, 
-            stride=self.patch_size // 2, 
+            kernel_size=self.patch_size,
+            stride=self.patch_size // 2,
             padding=self.patch_size // 4,
         )
         self.proj = nn.Linear(
@@ -190,7 +191,12 @@ class ViTEncoder(nn.Module):
         embed_dim: int,
         num_heads: int,
         num_blocks: int,
+        num_layers: int,
         dropout: int,
+        with_swin: bool,
+        swin_depth: int,
+        window_size: int,
+        **kwargs,
     ) -> None:
         super().__init__()
         self.input_res = input_res
@@ -212,9 +218,16 @@ class ViTEncoder(nn.Module):
             torch.randn(size=(1, num_patches, embed_dim)) * scale
         )
         self.pre_net_norm = nn.LayerNorm(embed_dim)
-        self.transformer = nn.Sequential(
-            *[Block(embed_dim, num_heads, dropout) for _ in range(num_blocks)]
-        )
+        self.transformer = nn.ModuleList()
+        for _ in range(num_layers):
+            if with_swin:
+                self.transformer.append(
+                    MultiSwinBlock(
+                        embed_dim, patch_res, swin_depth, num_heads, window_size
+                    )
+                )
+            for _ in range(num_blocks):
+                self.transformer.append(Block(embed_dim, num_heads, dropout))
 
         self.initialize_weights()
 
@@ -235,7 +248,8 @@ class ViTEncoder(nn.Module):
         x = self.patch_embedding.forward(x)
         x = x + self.position_embedding
         x = self.pre_net_norm(x)
-        x = self.transformer(x)
+        for layer in self.transformer:
+            x = layer.forward(x)
 
         return x
 
@@ -249,7 +263,12 @@ class ViTDecoder(nn.Module):
         embed_dim: int,
         num_heads: int,
         num_blocks: int,
+        num_layers: int,
         dropout: int,
+        with_swin: bool,
+        swin_depth: int,
+        window_size: int,
+        **kwargs,
     ) -> None:
         super().__init__()
 
@@ -272,9 +291,17 @@ class ViTDecoder(nn.Module):
         )
         self.post_net_norm = nn.LayerNorm(embed_dim)
 
-        self.transformer = nn.Sequential(
-            *[Block(embed_dim, num_heads, dropout) for _ in range(num_blocks)]
-        )
+        self.transformer = nn.ModuleList()
+        for _ in range(num_layers):
+            if with_swin:
+                self.transformer.append(
+                    MultiSwinBlock(
+                        embed_dim, patch_res, swin_depth, num_heads, window_size
+                    )
+                )
+            for _ in range(num_blocks):
+                self.transformer.append(Block(embed_dim, num_heads, dropout))
+
         self.proj = Upscale(num_channels, embed_dim, patch_size)
 
         self.initialize_weights()
@@ -282,7 +309,8 @@ class ViTDecoder(nn.Module):
     def forward(self, x):
         H, W = self.input_res
         x = x + self.position_embedding
-        x = self.transformer(x)
+        for layer in self.transformer:
+            x = layer.forward(x)
         x = self.post_net_norm(x)
         x = self.proj(x, *self.patch_res)
 
