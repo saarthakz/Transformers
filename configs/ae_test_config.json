@@ -1,0 +1,22 @@
+{
+    "input_res": [
+        64,
+        64
+    ],
+    "patch_size": 4,
+    "num_channels": 3,
+    "num_codebook_embeddings": 1024,
+    "codebook_dim": 32,
+    "num_layers": 2,
+    "num_heads": 4,
+    "with_shifted_patch_embeddings": false,
+    "with_swin": true,
+    "window_size": 4,
+    "swin_depth": 2,
+    "num_blocks": 2,
+    "model_name": "ViT_SS_PoolDown_BilinUp",
+    "with_vq": true,
+    "recon_batch_size": 16,
+    "model_from_checkpoint": true,
+    "model_checkpoint_path": "./models/ViT_SS_PoolDown_BilinUp/pytorch_model.bin"
+}

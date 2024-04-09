@@ -21,6 +21,7 @@ from model_classes.VIT_PatchModifier import (
     ViT_PatchMergeExpand,
     ViT_OverlapPatchMergeExpand,
 )
+import wandb
 
 
 def main(config: dict):
@@ -59,7 +60,6 @@ def main(config: dict):
             transforms.ToTensor(),
             transforms.CenterCrop(size=(178, 178)),
             transforms.Resize(size=(64, 64), antialias=True),
-            transforms.Normalize([0.5, 0.5, 0.5], [0.5, 0.5, 0.5]),
         ]
     )
 
@@ -81,6 +81,12 @@ def main(config: dict):
     # Model
     model = ViT_PatchMergeExpand(**config)
 
+    # Print # of model parameters
+    accelerator.print(
+        sum(param.numel() for param in model.parameters()) / 1e6, "M parameters"
+    )
+
+    # Load a model checkpoint
     if config["model_from_checkpoint"]:
         model.load_state_dict(torch.load(f=config["model_checkpoint_path"]))
         accelerator.print(
@@ -88,11 +94,6 @@ def main(config: dict):
         )
 
     model = accelerator.prepare_model(model=model)
-
-    # Print # of model parameters
-    accelerator.print(
-        sum(param.numel() for param in model.parameters()) / 1e6, "M parameters"
-    )
 
     # Optimizers
     optim = torch.optim.AdamW(model.parameters(), lr=config["lr"])
@@ -136,8 +137,28 @@ def main(config: dict):
                 accelerator.log({"train_loss": loss}, step=total_steps)
 
                 if total_steps % checkpoint_step == 0:
+                    ckpt_dir = os.path.join(model_dir, "checkpoints", f"{total_steps}")
+                    images, recons = get_recons(
+                        model=model,
+                        dir=ckpt_dir,
+                        x=x[: config["recon_batch_size"]],
+                        with_vq=config["with_vq"],
+                        return_image=True,
+                    )
+                    accelerator.log(
+                        {
+                            "wandb": {
+                                "Images": wandb.Image(
+                                    images, caption=f"Step {total_steps}"
+                                ),
+                                "Recons": wandb.Image(
+                                    recons, caption=f"Step {total_steps}"
+                                ),
+                            }
+                        }
+                    )
                     accelerator.save_state(
-                        os.path.join(model_dir, "checkpoints", f"{total_steps}"),
+                        ckpt_dir,
                         safe_serialization=False,
                     )
 
@@ -146,7 +167,7 @@ def main(config: dict):
 
         total_loss += epoch_loss
         if accelerator.is_main_process:
-            epoch_loss_log = f"Epoch: {epoch}, Avg Epoch Loss {epoch_loss / (step + 1)}, Net Avg Loss"
+            epoch_loss_log = f"Epoch: {epoch}, Avg Epoch Loss {epoch_loss / (step + 1)}, Net Avg Loss: {total_loss / (total_steps + 1)}"
             logger.log(epoch_loss_log)
 
     accelerator.wait_for_everyone()
