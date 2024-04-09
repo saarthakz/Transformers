@@ -19,7 +19,7 @@ from model_classes.VIT_PoolDownsample_BilinearUpsample import (
 )
 from model_classes.VIT_PatchModifier import (
     ViT_PatchMergeExpand,
-    ViT_OverlapPatchMergeExpand
+    ViT_OverlapPatchMergeExpand,
 )
 
 
@@ -42,10 +42,7 @@ def main(config: dict):
         project_name="Major-Project",
         config=config,
         init_kwargs={
-            "wandb": {
-                "name": model_name,
-                "entity": "tangentmay"
-            },
+            "wandb": {"name": model_name, "entity": "tangentmay"},
         },
     )
 
@@ -82,7 +79,7 @@ def main(config: dict):
     train_loader = accelerator.prepare_data_loader(data_loader=train_loader)
 
     # Model
-    model = ViT_OverlapPatchMergeExpand(**config)
+    model = ViT_PatchMergeExpand(**config)
 
     if config["model_from_checkpoint"]:
         model.load_state_dict(torch.load(f=config["model_checkpoint_path"]))

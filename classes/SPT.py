@@ -1,25 +1,21 @@
 import torch
 from torch import nn
-from einops import rearrange
 from einops.layers.torch import Rearrange
-import math
 
 
 class PatchShiftAugmentation(nn.Module):
-    def __init__(self, patch_size):
+    def __init__(self, patch_size: int):
         super().__init__()
-        self.shift = int(patch_size * (1 / 2))
+        self.shift = patch_size // 2
         self.pad = nn.ConstantPad2d(padding=self.shift, value=0)
 
     def forward(self, x: torch.Tensor):
         x_pad = self.pad.forward(x)
 
-        x_lu = x_pad[..., : -self.shift * 2, : -self.shift * 2]
-        x_ru = x_pad[..., : -self.shift * 2, self.shift * 2 :]
-        x_lb = x_pad[..., self.shift * 2 :, : -self.shift * 2]
-        x_rb = x_pad[..., self.shift * 2 :, self.shift * 2 :]
+        x_up_pad = x_pad[..., : -self.shift * 2, self.shift : -self.shift]
+        x_left_pad = x_pad[..., self.shift : -self.shift, : -self.shift * 2]
 
-        return torch.cat([x, x_lu, x_ru, x_lb, x_rb], dim=-3)
+        return torch.cat([x, x_up_pad, x_left_pad], dim=-3)
 
 
 class ShiftedPatchEmbeddings(nn.Module):
@@ -33,7 +29,7 @@ class ShiftedPatchEmbeddings(nn.Module):
 
         self.patch_shift_augmentation = PatchShiftAugmentation(patch_size)
 
-        patch_dim = (num_channels * 5) * (patch_size**2)
+        patch_dim = (num_channels * 3) * (patch_size**2)
 
         self.patch_embedding = nn.Sequential(
             Rearrange(
