@@ -34,7 +34,7 @@ def main(config: dict):
     ddp_kwargs = DistributedDataParallelKwargs(find_unused_parameters=True)
     accelerator = Accelerator(
         project_dir=model_dir,
-        log_with="wandb",
+        # log_with="wandb",
         gradient_accumulation_steps=config["gradient_accumulation_steps"],
         kwargs_handlers=[ddp_kwargs],
     )
@@ -42,16 +42,16 @@ def main(config: dict):
     # Print the config file
     accelerator.print(config)
 
-    accelerator.init_trackers(
-        project_name="Major-Project",
-        config=config,
-        init_kwargs={
-            "wandb": {
-                "name": gpt_model_name,
-                "entity": "tangentmay",
-            },
-        },
-    )
+    # accelerator.init_trackers(
+    #     project_name="Major-Project",
+    #     config=config,
+    #     init_kwargs={
+    #         "wandb": {
+    #             "name": gpt_model_name,
+    #             "entity": "tangentmay",
+    #         },
+    #     },
+    # )
 
     if accelerator.is_main_process:
         os.makedirs(name=os.path.join(model_dir, "gpt"), exist_ok=True)
@@ -145,7 +145,7 @@ def main(config: dict):
                     ckpt_dir = os.path.join(
                         model_dir, "gpt", "checkpoints", f"{total_steps}"
                     )
-                    images = gpt.sample(config["recon_batch_size"])
+                    images = gpt.module.sample(config["recon_batch_size"])
                     accelerator.log(
                         {"Samples": wandb.Image(images, caption=f"Step {total_steps}")}
                     )

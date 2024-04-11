@@ -16,7 +16,7 @@ class VQTransformer(nn.Module):
         num_heads: int,
         num_codebook_embeddings: int,
         keep_prob=0.8,
-        **kwargs
+        **kwargs,
     ):
         super().__init__()
         self.keep_prob = keep_prob
@@ -42,8 +42,11 @@ class VQTransformer(nn.Module):
         B, C, D = x_enc.shape
         z_q, indices, loss = self.vq_model.quantize(x_enc)
 
+        # print(z_q.shape, indices.shape)
+
         # Indices will be fed to the transformer for prediction
         indices = indices.view(B, -1)
+        # print(indices.shape)
 
         # Base indices are also the target for when predicting from noisy indices
         target = indices
@@ -72,29 +75,30 @@ class VQTransformer(nn.Module):
     @torch.no_grad()
     def sample(self, num_samples=16):
 
-        device = self.vq_model.device
+        device = f"cuda:{torch.cuda.current_device()}"
 
         start_tokens = (
             torch.ones(size=[num_samples, 1], dtype=torch.long, device=device) * 0
         )
 
-        indices = self.transformer.generate(start_tokens, self.num_patches)[:, 1:]
+        indices = self.transformer.generate(start_tokens, 512)[:, 1:]
+        indices = indices.reshape(-1, 1)
 
         patch_H, patch_W = res_scaler(
             self.vq_model.init_patch_res, 1 / (2**self.vq_model.num_layers)
         )
 
         z_q = self.vq_model.vq.embedding.forward(indices).view(
-            size=(num_samples, patch_H, patch_W, self.embed_dim)
-        )  # (B, H, W, D)
+            size=(num_samples, patch_H * patch_W, 256)
+        )
 
-        z_q = z_q.permute(0, 3, 1, 2)  # (B, D, H, W)
+        # z_q = z_q.permute(0, 3, 1, 2)  # (B, D, H, W)
 
-        z_q = z_q.view(
-            num_samples,
-            self.embed_dim,
-        ).transpose(
-            -2, -1
-        )  # (B, D, C) -> [after transpose] -> (B, C, D)
+        # z_q = z_q.view(
+        #     num_samples,
+        #     self.embed_dim,
+        # ).transpose(
+        #     -2, -1
+        # )  # (B, D, C) -> [after transpose] -> (B, C, D)
         recon_imgs = self.vq_model.decode(z_q)
         return recon_imgs

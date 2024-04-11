@@ -32,7 +32,7 @@
     "model_checkpoint_path": "./models/SwinViT_PatchMergeExpand/checkpoints/1600/pytorch_model.bin",
     "gpt_from_checkpoint": false,
     "gpt_checkpoint_path": "",
-    "num_checkpoints": 10,
+    "num_checkpoints": 20,
     "recon_batch_size": 16,
     "keep_prob": 0.8
 }
