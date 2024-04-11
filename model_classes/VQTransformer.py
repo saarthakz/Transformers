@@ -31,7 +31,7 @@ class VQTransformer(nn.Module):
         self.num_patches = H * W
 
         self.transformer = Transformer(
-            context=self.num_patches,
+            context=512,
             emb_dims=dim,
             vocab_size=num_codebook_embeddings,
             num_heads=num_heads,
@@ -40,13 +40,10 @@ class VQTransformer(nn.Module):
     def forward(self, x: torch.Tensor):
         x_enc = self.vq_model.encode(x)
         B, C, D = x_enc.shape
-        print(x_enc.shape)
         z_q, indices, loss = self.vq_model.quantize(x_enc)
 
-        print(indices.shape)
-
         # Indices will be fed to the transformer for prediction
-        indices = indices.view(B, C)
+        indices = indices.view(B, -1)
 
         # Base indices are also the target for when predicting from noisy indices
         target = indices

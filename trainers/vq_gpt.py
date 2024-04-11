@@ -19,9 +19,9 @@ from model_classes.VIT_Sampler import (
 )
 from model_classes.VIT_Patcher import (
     ViT_PatchMergeExpand,
-    ViT_OverlapPatchMergeExpand,
 )
-from model_classes.VITVQVAE import SwinViTVQVAE
+
+# from model_classes.VITVQVAE import SwinViTVQVAE
 from model_classes.VQTransformer import VQTransformer
 import wandb
 
