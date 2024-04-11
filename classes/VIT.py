@@ -68,6 +68,33 @@ class OverlappingPatchUnembedding(nn.Module):
         return x
 
 
+class PatchEmbeddingOld(nn.Module):
+    """
+    Convert the image into non overlapping patches and then project them into a vector space.
+    """
+
+    def __init__(self, num_channels: int, dim: int, patch_size: int):
+        super().__init__()
+        self.patch_size = patch_size
+        self.num_channels = num_channels
+        self.embed_dim = dim
+
+        # Create a projection layer to convert the image into patches
+        # The layer projects each patch into a vector of size hidden_size
+        self.projection = nn.Conv2d(
+            self.num_channels,
+            self.embed_dim,
+            kernel_size=self.patch_size,
+            stride=self.patch_size,
+        )
+
+    def forward(self, x: torch.Tensor):
+        # (batch_size, num_channels, image_size, image_size) -> (batch_size, num_patches, hidden_size)
+        x = self.projection.forward(x)
+        x = x.flatten(-2).transpose(-2, -1)
+        return x
+
+
 class PatchEmbedding(nn.Module):
     def __init__(self, num_channels=3, dim=128, patch_size=4) -> None:
         super().__init__()
@@ -109,6 +136,31 @@ class PatchUnembedding(nn.Module):
         x = x.transpose(-1, -2)
         x = self.patcher.forward(x)
         return x
+
+
+class Upscale(nn.Module):
+    def __init__(
+        self, patch_res: list[int], num_channels: int, embed_dim: int, patch_size: int
+    ) -> None:
+        super().__init__()
+        self.patch_res = patch_res
+        self.patch_size = patch_size
+        self.upscale = nn.ConvTranspose2d(
+            in_channels=embed_dim,
+            out_channels=num_channels,
+            kernel_size=patch_size,
+            stride=patch_size,
+        )
+
+    def forward(self, x: torch.Tensor):
+        B, C, D = x.shape
+        H, W = self.patch_res
+
+        assert H * W == C, f"Image dimensions don't match; {H} * {W} != {C} "
+        x = x.transpose(1, 2)  # B, D, C
+        x = x.view(B, D, H, W)
+        img = self.upscale.forward(input=x)
+        return img
 
 
 class PatchModifier(nn.Module):
