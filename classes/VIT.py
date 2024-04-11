@@ -68,34 +68,49 @@ class OverlappingPatchUnembedding(nn.Module):
         return x
 
 
-class PatchEmbeddings(nn.Module):
-    """
-    Convert the image into non overlapping patches and then project them into a vector space.
-    """
-
-    def __init__(self, num_channels: int, embed_dim: int, patch_size: int):
+class PatchEmbedding(nn.Module):
+    def __init__(self, num_channels=3, dim=128, patch_size=4) -> None:
         super().__init__()
-        self.patch_size = patch_size
         self.num_channels = num_channels
-        self.embed_dim = embed_dim
+        self.dim = (dim,)
+        self.patch_size = patch_size
 
-        # Create a projection layer to convert the image into patches
-        # The layer projects each patch into a vector of size hidden_size
-        self.projection = nn.Conv2d(
-            self.num_channels,
-            self.embed_dim,
-            kernel_size=self.patch_size,
-            stride=self.patch_size,
+        self.patcher = nn.Unfold(kernel_size=patch_size, stride=patch_size)
+        self.lin = nn.Linear(
+            in_features=num_channels * (patch_size**2), out_features=dim
         )
 
     def forward(self, x: torch.Tensor):
-        # (batch_size, num_channels, input_res, input_res) -> (batch_size, num_patches, hidden_size)
-        x = self.projection.forward(x)
-        x = x.flatten(-2).transpose(-2, -1)
+        x = self.patcher.forward(x)
+        x = x.transpose(-1, -2)
+        x = self.lin.forward(x)
         return x
 
 
-# Extrapolation of the PatchMerger by Google
+class PatchUnembedding(nn.Module):
+    def __init__(
+        self, input_res: list[int], num_channels=3, dim=128, patch_size=4
+    ) -> None:
+        super().__init__()
+        self.num_channels = num_channels
+        self.dim = (dim,)
+        self.patch_size = patch_size
+        self.input_res = input_res
+
+        self.lin = nn.Linear(
+            in_features=dim, out_features=num_channels * (patch_size**2)
+        )
+        self.patcher = nn.Fold(
+            output_size=input_res, kernel_size=patch_size, stride=patch_size
+        )
+
+    def forward(self, x: torch.Tensor):
+        x = self.lin.forward(x)
+        x = x.transpose(-1, -2)
+        x = self.patcher.forward(x)
+        return x
+
+
 class PatchModifier(nn.Module):
     def __init__(self, dim: int, num_tokens_out: int, use_scale=True):
         super().__init__()
@@ -208,7 +223,7 @@ class ViTEncoder(nn.Module):
             H % patch_size == 0 and W % patch_size == 0
         ), "Image dimensions must be divisible by the patch size."
 
-        self.patch_embedding = PatchEmbeddings(num_channels, embed_dim, patch_size)
+        self.patch_embedding = PatchEmbedding(num_channels, embed_dim, patch_size)
 
         scale = embed_dim**-0.5
         num_patches = H * W // (patch_size**2)

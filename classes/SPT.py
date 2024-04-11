@@ -18,7 +18,7 @@ class PatchShiftAugmentation(nn.Module):
         return torch.cat([x, x_up_pad, x_left_pad], dim=-3)
 
 
-class ShiftedPatchEmbeddings(nn.Module):
+class ShiftedPatchEmbedding(nn.Module):
     def __init__(
         self,
         num_channels,

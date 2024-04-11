@@ -7,3 +7,4 @@ images
 **/__pycache__
 **/*.zip
 wandb
+testing

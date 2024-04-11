@@ -17,12 +17,18 @@ from model_classes.VIT_Sampler import (
     ViT_PoolDownsample_BilinearUpsample,
     ViT_SS_PoolDown_BilinUp,
 )
-from model_classes.VIT_Patcher import ViT_PatchMergeExpand
+from model_classes.VIT_Patcher import (
+    ViT_PatchMergeExpand,
+    ViT_OverlapPatchMergeExpand,
+)
+from model_classes.VITVQVAE import SwinViTVQVAE
+from model_classes.VQTransformer import VQTransformer
 import wandb
 
 
 def main(config: dict):
     model_name = config["model_name"]
+    gpt_model_name = f"{config['model_name']} GPT"
     model_dir = os.path.join(os.getcwd(), "models", model_name)
 
     ddp_kwargs = DistributedDataParallelKwargs(find_unused_parameters=True)
@@ -40,19 +46,21 @@ def main(config: dict):
         project_name="Major-Project",
         config=config,
         init_kwargs={
-            "wandb": {"name": model_name, "entity": "tangentmay"},
+            "wandb": {
+                "name": gpt_model_name,
+                "entity": "tangentmay",
+            },
         },
     )
 
     if accelerator.is_main_process:
-        os.makedirs(name=model_dir, exist_ok=True)
-        logger = Logger(os.path.join(model_dir, "log.txt"))
+        os.makedirs(name=os.path.join(model_dir, "gpt"), exist_ok=True)
+        logger = Logger(os.path.join(model_dir, "gpt", "log.txt"))
 
     epochs = config["epochs"]
     batch_size = config["batch_size"]
 
     # Dataset and Dataloaders
-
     train_dataset = get_dataset(config["dataset"], config["input_res"])
 
     train_loader = DataLoader(
@@ -62,22 +70,36 @@ def main(config: dict):
     )
 
     # Model
-    model = ViT_SS_PoolDown_BilinUp(**config)
+    model = ViT_PatchMergeExpand(**config)
 
     # Print # of model parameters
     accelerator.print(
-        sum(param.numel() for param in model.parameters()) / 1e6, "M parameters"
+        sum(param.numel() for param in model.parameters()) / 1e6, "Model M parameters"
     )
 
     # Load a model checkpoint
     if config["model_from_checkpoint"]:
-        model.load_state_dict(torch.load(f=config["model_checkpoint_path"]))
+
         accelerator.print(
             "Model loaded from checkpoint: ", config["model_checkpoint_path"]
         )
 
+    # GPT
+    gpt = VQTransformer(vq_model=model, **config)
+
+    # Print # of GPT parameters
+    accelerator.print(
+        sum(param.numel() for param in gpt.parameters()) / 1e6,
+        "Transformer M parameters",
+    )
+
+    # Load GPT checkpoint
+    if config["gpt_from_checkpoint"]:
+        gpt.load_state_dict(torch.load(f=config["gpt_checkpoint_path"]))
+        accelerator.print("GPT loaded from checkpoint: ", config["gpt_checkpoint_path"])
+
     # Optimizers
-    optim = torch.optim.AdamW(model.parameters(), lr=config["lr"])
+    optim = torch.optim.AdamW(gpt.parameters(), lr=config["lr"])
 
     # Load a state from checkpoint if required
     if config["state_from_checkpoint"]:
@@ -88,7 +110,7 @@ def main(config: dict):
 
     # Acceleration :P
     train_loader = accelerator.prepare_data_loader(data_loader=train_loader)
-    model = accelerator.prepare_model(model=model)
+    gpt = accelerator.prepare_model(model=gpt)
     optim = accelerator.prepare_optimizer(optimizer=optim)
 
     total_steps = epochs * len(train_loader)
@@ -106,13 +128,11 @@ def main(config: dict):
     for epoch in range(epochs):
         epoch_loss = 0
         for step, batch in enumerate(train_loader):
-            with accelerator.accumulate(model):
+            with accelerator.accumulate(gpt):
                 x, y = batch
 
                 # evaluate the loss
-                recon, codebook_indices, q_loss = model.forward(x)
-                recon_loss = nn.functional.mse_loss(x, recon)
-                loss: torch.Tensor = q_loss + recon_loss
+                logits, loss = gpt.forward(x)
                 epoch_loss += loss.detach().item()
                 optim.zero_grad()
                 accelerator.backward(loss)
@@ -122,23 +142,12 @@ def main(config: dict):
                 accelerator.log({"train_loss": loss}, step=total_steps)
 
                 if total_steps % checkpoint_step == 0:
-                    ckpt_dir = os.path.join(model_dir, "checkpoints", f"{total_steps}")
-                    images, recons = get_recons(
-                        model=model,
-                        dir=ckpt_dir,
-                        x=x[: config["recon_batch_size"]],
-                        with_vq=config["with_vq"],
-                        return_image=True,
+                    ckpt_dir = os.path.join(
+                        model_dir, "gpt", "checkpoints", f"{total_steps}"
                     )
+                    images = gpt.sample(config["recon_batch_size"])
                     accelerator.log(
-                        {
-                            "Images": wandb.Image(
-                                images, caption=f"Step {total_steps}"
-                            ),
-                            "Recons": wandb.Image(
-                                recons, caption=f"Step {total_steps}"
-                            ),
-                        }
+                        {"Samples": wandb.Image(images, caption=f"Step {total_steps}")}
                     )
                     accelerator.save_state(
                         ckpt_dir,
@@ -155,7 +164,9 @@ def main(config: dict):
 
     accelerator.wait_for_everyone()
     accelerator.end_training()
-    accelerator.save_model(model, os.path.join(model_dir), safe_serialization=False)
+    accelerator.save_model(
+        gpt, os.path.join(model_dir, "gpt"), safe_serialization=False
+    )
 
 
 if __name__ == "__main__":

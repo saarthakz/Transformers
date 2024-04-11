@@ -93,7 +93,6 @@ class VectorQuantizerEMA(nn.Module):
             encoding_indices.shape[0], self.num_embeddings, device=inputs.device
         )
         encodings.scatter_(1, encoding_indices, 1)
-        # print(encodings.shape)
 
         # Quantize and unflatten
         quantized = torch.matmul(encodings, self.embedding.weight).view(input_shape)

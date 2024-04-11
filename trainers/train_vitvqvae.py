@@ -277,7 +277,7 @@ def main(args):
 
         indices = transformer.generate(start_tokens, num_patches)[:, 1:]
 
-        z_q = model.quantize.embedding.forward(indices).view(
+        z_q = model.quantizer.embedding.forward(indices).view(
             size=(args.num_new_images, num_patch_sqrt, num_patch_sqrt, args.latent_dim)
         )  # (B, H, W, D)
 
