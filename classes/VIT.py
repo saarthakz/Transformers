@@ -140,13 +140,18 @@ class PatchUnembedding(nn.Module):
 
 class Upscale(nn.Module):
     def __init__(
-        self, patch_res: list[int], num_channels: int, embed_dim: int, patch_size: int
+        self,
+        patch_res: list[int],
+        num_channels: int,
+        dim: int,
+        patch_size: int,
     ) -> None:
         super().__init__()
+        self.dim = dim
         self.patch_res = patch_res
         self.patch_size = patch_size
         self.upscale = nn.ConvTranspose2d(
-            in_channels=embed_dim,
+            in_channels=dim,
             out_channels=num_channels,
             kernel_size=patch_size,
             stride=patch_size,
@@ -223,30 +228,6 @@ class Upsample(nn.Module):
         x = x.view(B, C, -1).transpose(-2, -1)
         x = self.proj.forward(x)
         return x
-
-
-class Upscale(nn.Module):
-    def __init__(self, num_channels: int, embed_dim: int, patch_size: int) -> None:
-        super().__init__()
-
-        self.patch_size = patch_size
-        self.upscale = nn.ConvTranspose2d(
-            in_channels=embed_dim,
-            out_channels=num_channels,
-            kernel_size=patch_size,
-            stride=patch_size,
-        )
-
-    def forward(self, x: torch.Tensor, height: int, width: int):
-        B, C, D = x.shape
-
-        assert (
-            height * width == C
-        ), f"Image dimensions don't match; {height} * {width} != {C} "
-        x = x.transpose(1, 2)  # B, D, C
-        x = x.view(B, D, height, width)
-        img = self.upscale.forward(input=x)
-        return img
 
 
 class ViTEncoder(nn.Module):

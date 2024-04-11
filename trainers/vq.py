@@ -17,7 +17,7 @@ from model_classes.VIT_Sampler import (
     ViT_PoolDownsample_BilinearUpsample,
     ViT_SS_PoolDown_BilinUp,
 )
-from model_classes.VIT_Patcher import ViT_PatchMergeExpand
+from model_classes.VIT_Patcher import ViT_PatchMergeExpand, ViT_PatchMergeExpand_Old
 import wandb
 
 
@@ -62,7 +62,7 @@ def main(config: dict):
     )
 
     # Model
-    model = ViT_SS_PoolDown_BilinUp(**config)
+    model = ViT_PatchMergeExpand_Old(**config)
 
     # Print # of model parameters
     accelerator.print(

@@ -38,8 +38,6 @@ class VectorQuantizer(nn.Module):
             dis, dim=1
         )  # Getting the indices of the min distant vector for each input
 
-        print(min_encoding_indices.shape)
-
         z_q = self.embedding.forward(min_encoding_indices).view(
             z.shape
         )  # Getting the codebook vectors
@@ -92,8 +90,6 @@ class VectorQuantizerEMA(nn.Module):
 
         # Encoding
         encoding_indices = torch.argmin(distances, dim=1).unsqueeze(1)
-
-        print(encoding_indices.shape)
 
         encodings = torch.zeros(
             encoding_indices.shape[0], self.num_embeddings, device=inputs.device
