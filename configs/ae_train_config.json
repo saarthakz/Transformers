@@ -23,7 +23,7 @@
     "beta": 0.5,
     "decay": 0.99,
     "gradient_accumulation_steps": 2,
-    "epochs": 100,
+    "epochs": 1,
     "batch_size": 256,
     "lr": 1e-4,
     "state_from_checkpoint": false,

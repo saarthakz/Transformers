@@ -84,13 +84,22 @@ class VQTransformer(nn.Module):
         indices = self.transformer.generate(start_tokens, 512)[:, 1:]
         indices = indices.reshape(-1, 1)
 
+        encodings = torch.zeros(indices.shape[0], self.num_embeddings, device=device)
+        encodings.scatter_(1, indices, 1)
+
+        # Quantize and unflatten
+        quantized = torch.matmul(encodings, self.embedding.weight).view(
+            size=(num_samples, patch_H * patch_W, 256)
+        )
+        quantized = quantized.permute(0, 3, 1, 2).contiguous()
+
         patch_H, patch_W = res_scaler(
             self.vq_model.init_patch_res, 1 / (2**self.vq_model.num_layers)
         )
 
-        z_q = self.vq_model.vq.embedding.forward(indices).view(
-            size=(num_samples, patch_H * patch_W, 256)
-        )
+        # z_q = self.vq_model.vq.embedding.forward(indices).view(
+        #     size=(num_samples, patch_H * patch_W, 256)
+        # )
 
         # z_q = z_q.permute(0, 3, 1, 2)  # (B, D, H, W)
 
