@@ -149,7 +149,7 @@ class ViT_PatchMergeExpand(nn.Module):
     def __init__(
         self,
         dim=128,
-        input_res: list[int] = (64, 64),
+        input_res: list[int] = [64, 64],
         patch_size=4,
         num_channels=3,
         num_codebook_embeddings=1024,
