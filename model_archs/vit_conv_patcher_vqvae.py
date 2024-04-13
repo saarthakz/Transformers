@@ -46,13 +46,13 @@ class Model(nn.Module):
         self.init_patch_res = res
 
         # Encoder Layers
-        for idx in range(self.num_layers):
-            for _ in range(self.num_blocks[idx]):
+        for layer_idx, layer in enumerate(num_heads):
+            for idx in range(layer):
                 self.encoder.append(
                     ConvAttention(
                         dim=dim,
-                        dim_head=dim // num_heads[idx],
-                        heads=num_heads[idx],
+                        dim_head=dim // num_heads[layer_idx][idx],
+                        heads=num_heads[layer_idx][idx],
                         dropout=dropout,
                     )
                 )

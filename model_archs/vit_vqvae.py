@@ -25,7 +25,7 @@ class Model(nn.Module):
         num_blocks (int): Number of blocks in both encoder and decoder,
         dropout (int): Attention Dropout,
         beta (int): Commitment factor for calculation of codebook loss,
-
+        decay (float): Decay for VectorQuantizer with EMA training
     """
 
     def __init__(
@@ -36,15 +36,10 @@ class Model(nn.Module):
         num_channels: int,
         num_codebook_embeddings: int,
         codebook_dim: int,
-        num_heads: int,
-        num_blocks: int,
-        num_layers: int,
+        num_heads: list[int],
         dropout: int,
         beta: int,
-        decay=0.01,
-        with_swin=False,
-        swin_depth=2,
-        window_size=4,
+        decay=0,
         **kwargs,
     ):
         super().__init__()
@@ -55,12 +50,7 @@ class Model(nn.Module):
             num_channels,
             dim,
             num_heads,
-            num_blocks,
-            num_layers,
             dropout,
-            with_swin,
-            swin_depth,
-            window_size,
         )
         self.decoder = ViTDecoder(
             input_res,
@@ -68,17 +58,12 @@ class Model(nn.Module):
             num_channels,
             dim,
             num_heads,
-            num_blocks,
-            num_layers,
             dropout,
-            with_swin,
-            swin_depth,
-            window_size,
         )
         self.quantizer = (
-            VectorQuantizer(num_codebook_embeddings, codebook_dim, beta)
-            if decay == 0
-            else VectorQuantizerEMA(num_codebook_embeddings, codebook_dim, beta, decay)
+            VectorQuantizerEMA(num_codebook_embeddings, codebook_dim, beta, decay)
+            if int(decay)
+            else VectorQuantizer(num_codebook_embeddings, codebook_dim, beta)
         )
         self.pre_quant = nn.Linear(dim, codebook_dim)
         self.post_quant = nn.Linear(codebook_dim, dim)
