@@ -7,17 +7,14 @@ import torch.nn as nn
 from utils.logger import Logger
 from utils.get_recons import get_recons
 from utils.get_dataset import get_dataset
+from utils.get_model_arch import get_model_arch
+from utils.get_optimizer import get_optimizer
 import math
 from tqdm.auto import tqdm
 from torch.utils.data import DataLoader
 from accelerate import Accelerator, DistributedDataParallelKwargs
 import argparse
 import json
-from model_classes.VIT_Sampler import (
-    ViT_PoolDownsample_BilinearUpsample,
-    ViT_SS_PoolDown_BilinUp,
-)
-from model_classes.VIT_Patcher import ViT_PatchMergeExpand, ViT_PatchMergeExpand_Old
 import wandb
 
 
@@ -36,13 +33,17 @@ def main(config: dict):
     # Print the config file
     accelerator.print(config)
 
-    accelerator.init_trackers(
-        project_name="Major-Project",
-        config=config,
-        init_kwargs={
-            "wandb": {"name": model_name, "entity": "tangentmay"},
-        },
-    )
+    if config["tracking"]:
+        accelerator.init_trackers(
+            project_name="Major-Project",
+            config=config,
+            init_kwargs={
+                "wandb": {
+                    "name": model_name,
+                    # "entity": "zsaarthakz",
+                },
+            },
+        )
 
     if accelerator.is_main_process:
         os.makedirs(name=model_dir, exist_ok=True)
@@ -62,7 +63,8 @@ def main(config: dict):
     )
 
     # Model
-    model = ViT_PatchMergeExpand_Old(**config)
+    model = get_model_arch(config["model_arch"])(**config)
+    accelerator.print(model)
 
     # Print # of model parameters
     accelerator.print(
@@ -77,7 +79,7 @@ def main(config: dict):
         )
 
     # Optimizers
-    optim = torch.optim.AdamW(model.parameters(), lr=config["lr"])
+    optim = get_optimizer(config["optimizer"])(model.parameters(), lr=config["lr"])
 
     # Load a state from checkpoint if required
     if config["state_from_checkpoint"]:

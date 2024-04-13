@@ -184,7 +184,7 @@ class SinusoidalPositionalEmbedding(nn.Module):
         return grid.to(x)
 
 
-class SS_BilinearUpsample(nn.Module):
+class BilinearUpsample(nn.Module):
     """Swin BilinearUpsample Layer.
 
     Args:
@@ -231,7 +231,7 @@ class SS_BilinearUpsample(nn.Module):
         return x
 
 
-class SS_PoolDownsample(nn.Module):
+class PoolDownsample(nn.Module):
     """Swin Pool Downsample Layer.
 
     Args:

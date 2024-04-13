@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 import os
 import sys
+from einops import repeat
 
 sys.path.append(os.path.abspath("."))
 from typing import Union
@@ -130,6 +131,21 @@ class PatchMerge(nn.Module):
         return x
 
 
+class ConvPatchMerge(nn.Module):
+    def __init__(self, dim, dim_out) -> None:
+        super().__init__()
+        # https://arxiv.org/abs/2208.03641 shows this is the most optimal way to downsample
+        # named SP-conv in the paper, but basically a pixel unshuffle
+        self.net = nn.Sequential(
+            nn.PixelUnshuffle(2),
+            # Rearrange('b c (h s1) (w s2) -> b (c s1 s2) h w', s1 = 2, s2 = 2),
+            nn.Conv2d(dim * 4, dim_out, kernel_size=1),
+        )
+
+    def forward(self, x: torch.Tensor):
+        return self.net.forward(x)
+
+
 class PatchExpand(nn.Module):
     def __init__(
         self,
@@ -158,6 +174,34 @@ class PatchExpand(nn.Module):
         x = x.view(B, C // 4, -1).permute(0, 2, 1)
         x = self.proj(x)
         return x
+
+
+class ConvPatchExpand(nn.Module):
+    """
+    code shared by @MalumaDev at DALLE2-pytorch for addressing checkboard artifacts
+    https://arxiv.org/ftp/arxiv/papers/1707/1707.02937.pdf
+    """
+
+    def __init__(self, dim, dim_out=None):
+        super().__init__()
+        self.conv = nn.Conv2d(dim, dim_out * 4, kernel_size=1)
+
+        self.net = nn.Sequential(nn.SiLU(), nn.PixelShuffle(2))
+
+        self.init_conv_()
+
+    def init_conv_(self):
+        o, i, h, w = self.conv.weight.shape
+        conv_weight = torch.empty(o // 4, i, h, w)
+        nn.init.kaiming_uniform_(conv_weight)
+        conv_weight = repeat(conv_weight, "o ... -> (o 4) ...")
+
+        self.conv.weight.data.copy_(conv_weight)
+        nn.init.zeros_(self.conv.bias.data)
+
+    def forward(self, x):
+        x = self.conv.forward(x)
+        return self.net.forward(x)
 
 
 class WindowAttention(nn.Module):

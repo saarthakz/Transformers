@@ -8,7 +8,7 @@ from classes.Transformers import Transformer
 from classes.Swin import res_scaler
 
 
-class VQTransformer(nn.Module):
+class Model(nn.Module):
     def __init__(
         self,
         vq_model: nn.Module,

@@ -12,7 +12,7 @@ from classes.VIT import (
 )
 
 
-class ViTVQVAE(nn.Module):
+class Model(nn.Module):
     """
     Args:
         input_res (list[int]): Image size as (H, W),
@@ -96,7 +96,7 @@ class ViTVQVAE(nn.Module):
     def decode(self, x: torch.Tensor):
         x = self.post_quant(x)
         x = self.decoder(x)
-        # x = x.clamp(-1.0, 1.0)
+        x = x.clamp(-1.0, 1.0)
         return x
 
     def quantize(self, x_enc: torch.Tensor):

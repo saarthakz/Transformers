@@ -9,66 +9,65 @@ sys.path.append(os.path.abspath("."))
 from classes.Transformers import Block, FeedForward, MultiHeadAttention
 from classes.SpectralNorm import SpectralNorm
 from classes.Swin import MultiSwinBlock
+from einops import rearrange, einsum
 
 
-class OverlappingPatchEmbedding(nn.Module):
+def stable_softmax(t, dim=-1, alpha=32**2):
+    t = t / alpha
+    t = t - torch.amax(t, dim=dim, keepdim=True).detach()
+    return (t * alpha).softmax(dim=dim)
 
-    def __init__(
-        self, input_res: int, num_channels: int, embed_dim: int, patch_size: int
-    ):
+
+class LayerNormChan(nn.Module):
+    def __init__(self, dim, eps=1e-5):
         super().__init__()
+        self.eps = eps
+        self.gamma = nn.Parameter(torch.ones(1, dim, 1, 1))
 
-        assert patch_size % 4 == 0, "Patch size must be a multiple of 4"
-
-        self.patch_size = patch_size
-        self.num_channels = num_channels
-        self.embed_dim = embed_dim
-        self.input_res = input_res
-
-        self.merger = nn.Unfold(
-            kernel_size=self.patch_size,
-            stride=self.patch_size // 2,
-            padding=self.patch_size // 4,
-        )
-        self.proj = nn.Linear(
-            in_features=(patch_size**2) * num_channels, out_features=embed_dim
-        )
-
-    def forward(self, x: torch.Tensor):
-        x = self.merger.forward(x)
-        x = x.transpose(-2, -1)
-        x = self.proj.forward(x)
-        return x
+    def forward(self, x):
+        var = torch.var(x, dim=1, unbiased=False, keepdim=True)
+        mean = torch.mean(x, dim=1, keepdim=True)
+        return (x - mean) / (var + self.eps).sqrt() * self.gamma
 
 
-class OverlappingPatchUnembedding(nn.Module):
-    def __init__(
-        self, image_size: int, num_channels: int, embed_dim: int, patch_size: int
-    ):
+class ConvAttention(nn.Module):
+    def __init__(self, dim, dim_head=64, heads=8, dropout=0.0):
         super().__init__()
-        self.patch_size = patch_size
-        self.num_channels = num_channels
-        self.embed_dim = embed_dim
-        self.image_size = image_size
+        self.heads = heads
+        self.scale = dim_head**-0.5
+        inner_dim = heads * dim_head
 
-        self.proj = nn.Linear(
-            in_features=embed_dim, out_features=(patch_size**2) * num_channels
+        self.dropout = nn.Dropout(dropout)
+        self.pre_norm = LayerNormChan(dim)
+
+        self.to_qkv = nn.Conv2d(dim, inner_dim * 3, 1, bias=False)
+        self.to_out = nn.Conv2d(inner_dim, dim, 1, bias=False)
+
+    def forward(self, x):
+        h = self.heads
+        height, width, residual = *x.shape[-2:], x.clone()
+
+        x = self.pre_norm(x)
+
+        q, k, v = self.to_qkv(x).chunk(3, dim=1)
+
+        q, k, v = map(
+            lambda t: rearrange(t, "b (h c) x y -> b h c (x y)", h=h), (q, k, v)
         )
-        self.merger = nn.Fold(
-            output_size=image_size,
-            kernel_size=patch_size,
-            stride=patch_size // 2,
-            padding=patch_size // 4,
-        )
 
-    def forward(self, x: torch.Tensor):
-        x = self.proj(x)
-        x = x.transpose(-2, -1)
-        x = self.merger(x)
-        return x
+        sim = einsum(q, k, "b h c i, b h c j -> b h i j") * self.scale
+
+        attn = stable_softmax(sim, dim=-1)
+        attn = self.dropout(attn)
+
+        out = einsum(attn, v, "b h i j, b h c j -> b h c i")
+        out = rearrange(out, "b h c (x y) -> b (h c) x y", x=height, y=width)
+        out = self.to_out(out)
+
+        return out + residual
 
 
-class PatchEmbeddingOld(nn.Module):
+class ConvPatchEmbedding(nn.Module):
     """
     Convert the image into non overlapping patches and then project them into a vector space.
     """
@@ -138,7 +137,7 @@ class PatchUnembedding(nn.Module):
         return x
 
 
-class Upscale(nn.Module):
+class ConvPatchUnembedding(nn.Module):
     def __init__(
         self,
         patch_res: list[int],
@@ -184,50 +183,6 @@ class PatchModifier(nn.Module):
             sim = sim * self.scale
         attn = functional.softmax(sim, dim=-1)
         return attn @ x
-
-
-class PoolDownsample(nn.Module):
-    def __init__(self, input_res: list[int], kernel_size=3, stride=2, padding=1):
-        super().__init__()
-        self.input_res = input_res
-        self.kernel_size = kernel_size
-        self.stride = stride
-        self.padding = padding
-        self.max_pool = nn.MaxPool2d(
-            kernel_size=kernel_size, stride=stride, padding=padding
-        )
-        self.avg_pool = nn.AvgPool2d(
-            kernel_size=kernel_size, stride=stride, padding=padding
-        )
-
-    def forward(self, x: torch.Tensor):
-        B, L, C = x.shape
-        H, W = self.input_res
-        assert L == H * W, "Resolution mismatch"
-        x = x.transpose(-2, -1).view(B, C, H, W)
-        max_pool_features = self.max_pool.forward(x)
-        avg_pool_features = self.avg_pool.forward(x)
-        features = torch.cat([max_pool_features, avg_pool_features], dim=1)
-        features = features.view(B, 2 * C, -1).transpose(-2, -1)
-        return features
-
-
-class Upsample(nn.Module):
-    def __init__(self, input_res: list[int], dim: int):
-        super().__init__()
-        self.input_res = input_res
-        self.upsample = nn.Upsample(scale_factor=2, mode="bilinear", align_corners=True)
-        self.proj = nn.Linear(in_features=dim, out_features=dim // 2)
-
-    def forward(self, x: torch.Tensor):
-        B, L, C = x.shape
-        H, W = self.input_res
-        assert L == H * W, "Resolution mismatch"
-        x = x.transpose(-2, -1).view(B, C, H, W)
-        x = self.upsample.forward(x)
-        x = x.view(B, C, -1).transpose(-2, -1)
-        x = self.proj.forward(x)
-        return x
 
 
 class ViTEncoder(nn.Module):

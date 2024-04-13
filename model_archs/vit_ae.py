@@ -9,30 +9,26 @@ from classes.VIT import (
     PatchEmbedding,
     PatchUnembedding,
     Block,
-    PoolDownsample,
-    Upsample,
 )
 from classes.VectorQuantizer import VectorQuantizerEMA
-from classes.Swin import res_scaler, MultiSwinBlock
 from classes.StyleSwin import PoolDownsample, BilinearUpsample
 from classes.SPT import ShiftedPatchEmbedding
+from classes.Swin import res_scaler
 
 
-class ViT_PoolDown_BilinUp(nn.Module):
+class Model(nn.Module):
     def __init__(
         self,
-        dim=128,
-        input_res: list[int] = (64, 64),
+        dim=192,
+        input_res: list[int] = [64, 64],
         patch_size=4,
         num_channels=3,
         num_codebook_embeddings=1024,
         codebook_dim=32,
         num_blocks=[2, 2],
         num_heads=[3, 6],
-        window_size=4,
         with_shifted_patch_embeddings=False,
-        beta=0.25,
-        decay=0.01,
+        dropout=0.01,
         **kwargs
     ):
         super().__init__()
@@ -57,22 +53,18 @@ class ViT_PoolDown_BilinUp(nn.Module):
         # Encoder Layers
         for idx in range(self.num_layers):
             for _ in range(self.num_blocks[idx]):
-                self.encoder.append(Block(dim, num_heads[idx]))
+                self.encoder.append(Block(dim, num_heads[idx], dropout))
 
             self.encoder.append(PoolDownsample(res, dim, dim * 2))
             dim = dim * 2
             res = res_scaler(res, 0.5)
-
-        self.pre_quant = nn.Linear(dim, codebook_dim)
-        self.vq = VectorQuantizerEMA(num_codebook_embeddings, codebook_dim, beta, decay)
-        self.post_quant = nn.Linear(codebook_dim, dim)
 
         self.num_heads.reverse()
 
         # Decoder Layers
         for idx in range(self.num_layers):
             for _ in range(self.num_blocks[idx]):
-                self.decoder.append(Block(dim, num_heads[idx]))
+                self.decoder.append(Block(dim, num_heads[idx], dropout))
 
             self.decoder.append(BilinearUpsample(res, dim, dim // 2))
 
@@ -88,11 +80,9 @@ class ViT_PoolDown_BilinUp(nn.Module):
         x = self.patch_embedding.forward(x)
         for layer in self.encoder:
             x = layer.forward(x)
-        x = self.pre_quant.forward(x)
         return x
 
     def decode(self, z_q: torch.Tensor):
-        z_q = self.post_quant.forward(z_q)
         for layer in self.decoder:
             z_q = layer.forward(z_q)
 
@@ -100,23 +90,10 @@ class ViT_PoolDown_BilinUp(nn.Module):
 
         return z_q
 
-    def quantize(self, x_enc: torch.Tensor):
-        B, C, D = x_enc.shape
-        patch_H, patch_W = res_scaler(self.init_patch_res, 1 / (2**self.num_layers))
-
-        assert (
-            C == patch_H * patch_W
-        ), "Input patch length does not match the patch resolution"
-        x_enc = x_enc.transpose(-2, -1).view(B, D, patch_H, patch_W)
-        z_q, indices, loss = self.vq.forward(x_enc)  # Vector Quantizer
-        z_q = z_q.view(B, D, C).transpose(-2, -1)
-        return z_q, indices, loss
-
     def forward(self, img: torch.Tensor):
         x_enc = self.encode(img)  # Encoder
-        z_q, indices, loss = self.quantize(x_enc)  # Vector Quantizer
-        recon_imgs = self.decode(z_q)  # Decoder
-        return recon_imgs, indices, loss
+        recon_imgs = self.decode(x_enc)  # Decoder
+        return recon_imgs, None, 0
 
     def get_recons(self, x: torch.Tensor):
         recon_imgs, _, _ = self.forward(x)
