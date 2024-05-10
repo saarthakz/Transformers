@@ -182,7 +182,7 @@ class ConvPatchExpand(nn.Module):
     https://arxiv.org/ftp/arxiv/papers/1707/1707.02937.pdf
     """
 
-    def __init__(self, dim, dim_out=None):
+    def __init__(self, dim, dim_out):
         super().__init__()
         self.conv = nn.Conv2d(dim, dim_out * 4, kernel_size=1)
 

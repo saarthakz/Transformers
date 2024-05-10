@@ -161,7 +161,7 @@ class ConvPatchUnembedding(nn.Module):
         H, W = self.patch_res
 
         assert H * W == C, f"Image dimensions don't match; {H} * {W} != {C} "
-        x = x.transpose(1, 2)  # B, D, C
+        x = x.transpose(-2, -1)  # B, D, C
         x = x.view(B, D, H, W)
         img = self.upscale.forward(input=x)
         return img
@@ -204,7 +204,7 @@ class ViTEncoder(nn.Module):
             H % patch_size == 0 and W % patch_size == 0
         ), "Image dimensions must be divisible by the patch size."
 
-        self.patch_embedding = ConvPatchEmbedding(patch_size, num_channels, embed_dim)
+        self.patch_embedding = ConvPatchEmbedding(num_channels, embed_dim, patch_size)
 
         scale = embed_dim**-0.5
         self.patch_res = res_scaler(self.input_res, 1 / self.patch_size)
@@ -215,7 +215,7 @@ class ViTEncoder(nn.Module):
         )
         self.pre_net_norm = nn.LayerNorm(embed_dim)
         self.transformer = nn.Sequential(
-            *[Block(embed_dim, num_heads[idx], dropout) for idx in num_heads]
+            *[Block(embed_dim, heads, dropout) for heads in num_heads]
         )
 
         self.initialize_weights()
@@ -262,8 +262,6 @@ class ViTDecoder(nn.Module):
             H % patch_size == 0 and W % patch_size == 0
         ), "Image dimensions must be divisible by the patch size."
 
-        self.patch_embedding = ConvPatchEmbedding(patch_size, num_channels, embed_dim)
-
         scale = embed_dim**-0.5
         self.patch_res = res_scaler(self.input_res, 1 / self.patch_size)
         patch_H, patch_W = self.patch_res
@@ -273,7 +271,7 @@ class ViTDecoder(nn.Module):
         )
         self.post_net_norm = nn.LayerNorm(embed_dim)
         self.transformer = nn.Sequential(
-            *[Block(embed_dim, num_heads[idx], dropout) for idx in num_heads]
+            *[Block(embed_dim, heads, dropout) for heads in num_heads]
         )
         self.proj = ConvPatchUnembedding(
             self.patch_res, num_channels, embed_dim, patch_size

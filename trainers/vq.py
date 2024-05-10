@@ -22,7 +22,7 @@ def main(config: dict):
     model_name = config["model_name"]
     model_dir = os.path.join(os.getcwd(), "models", model_name)
 
-    ddp_kwargs = DistributedDataParallelKwargs(find_unused_parameters=True)
+    ddp_kwargs = DistributedDataParallelKwargs(find_unused_parameters=config['acc_find_unused_params'])
     accelerator = Accelerator(
         project_dir=model_dir,
         log_with="wandb",
@@ -40,7 +40,7 @@ def main(config: dict):
             init_kwargs={
                 "wandb": {
                     "name": model_name,
-                    # "entity": "zsaarthakz",
+                    "entity": "tangentmay",
                 },
             },
         )

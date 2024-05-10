@@ -10,7 +10,7 @@ from classes.VIT import (
     PatchUnembedding,
     Block,
 )
-from classes.VectorQuantizer import VectorQuantizerEMA
+from classes.VectorQuantizer import VectorQuantizerEMA, VectorQuantizer
 from classes.Swin import res_scaler, PatchExpand, PatchMerge
 from classes.SPT import ShiftedPatchEmbedding
 
@@ -27,6 +27,8 @@ class Model(nn.Module):
         num_blocks=[2, 2],
         num_heads=[3, 6],
         with_shifted_patch_embeddings=False,
+        beta=0.5,
+        decay=0.99,
         **kwargs,
     ):
         super().__init__()
@@ -57,7 +59,11 @@ class Model(nn.Module):
             res = res_scaler(res, 0.5)
 
         self.pre_quant = nn.Linear(dim, codebook_dim)
-        self.vq = VectorQuantizerEMA(num_codebook_embeddings, codebook_dim, 0.5, 0.99)
+        self.vq = (
+            VectorQuantizerEMA(num_codebook_embeddings, codebook_dim, beta, decay)
+            if int(decay)
+            else VectorQuantizer(num_codebook_embeddings, codebook_dim, beta)
+        )        
         self.post_quant = nn.Linear(codebook_dim, dim)
 
         # Decoder Layers

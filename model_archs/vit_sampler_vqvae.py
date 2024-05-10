@@ -10,7 +10,7 @@ from classes.VIT import (
     PatchUnembedding,
     Block,
 )
-from classes.VectorQuantizer import VectorQuantizerEMA
+from classes.VectorQuantizer import VectorQuantizerEMA, VectorQuantizer
 from classes.StyleSwin import PoolDownsample, BilinearUpsample
 from classes.SPT import ShiftedPatchEmbedding
 from classes.Swin import res_scaler
@@ -28,8 +28,8 @@ class Model(nn.Module):
         num_blocks=[2, 2],
         num_heads=[3, 6],
         with_shifted_patch_embeddings=False,
-        beta=0.25,
-        decay=0.01,
+        beta=0.5,
+        decay=0.99,
         dropout=0.01,
         **kwargs
     ):
@@ -62,7 +62,11 @@ class Model(nn.Module):
             res = res_scaler(res, 0.5)
 
         self.pre_quant = nn.Linear(dim, codebook_dim)
-        self.vq = VectorQuantizerEMA(num_codebook_embeddings, codebook_dim, beta, decay)
+        self.vq = (
+            VectorQuantizerEMA(num_codebook_embeddings, codebook_dim, beta, decay)
+            if int(decay)
+            else VectorQuantizer(num_codebook_embeddings, codebook_dim, beta)
+        )
         self.post_quant = nn.Linear(codebook_dim, dim)
 
         self.num_heads.reverse()
