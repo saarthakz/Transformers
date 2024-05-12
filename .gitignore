@@ -8,3 +8,4 @@ images
 **/*.zip
 wandb
 testing
+**/.vscode

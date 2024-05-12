@@ -8,7 +8,7 @@ from torch.nn import functional
 sys.path.append(os.path.abspath("."))
 from classes.Transformers import Block, FeedForward, MultiHeadAttention
 from classes.SpectralNorm import SpectralNorm
-from classes.Swin import MultiSwinBlock, res_scaler
+from classes.Swin import res_scaler
 from einops import rearrange, einsum
 
 

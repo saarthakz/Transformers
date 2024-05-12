@@ -10,6 +10,7 @@ from classes.VIT import (
     ViTEncoder,
     ViTDecoder,
 )
+from classes.Swin import res_scaler
 
 
 class Model(nn.Module):
@@ -38,11 +39,13 @@ class Model(nn.Module):
         codebook_dim: int,
         num_heads: list[int],
         dropout: int,
-        beta: int,
-        decay=0,
+        beta=0.5,
+        decay=0.99,
         **kwargs,
     ):
         super().__init__()
+
+        self.patch_res = res_scaler(input_res, 1 / patch_size)
 
         self.encoder = ViTEncoder(
             input_res,
@@ -86,7 +89,7 @@ class Model(nn.Module):
 
     def quantize(self, x_enc: torch.Tensor):
         B, C, D = x_enc.shape
-        patch_H, patch_W = self.encoder.patch_res
+        patch_H, patch_W = self.patch_res
 
         assert (
             C == patch_H * patch_W

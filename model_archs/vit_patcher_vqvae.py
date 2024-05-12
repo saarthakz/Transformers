@@ -63,7 +63,7 @@ class Model(nn.Module):
             VectorQuantizerEMA(num_codebook_embeddings, codebook_dim, beta, decay)
             if int(decay)
             else VectorQuantizer(num_codebook_embeddings, codebook_dim, beta)
-        )        
+        )
         self.post_quant = nn.Linear(codebook_dim, dim)
 
         # Decoder Layers
@@ -83,9 +83,12 @@ class Model(nn.Module):
         x = self.patch_embedding.forward(x)
         for layer in self.encoder:
             x = layer.forward(x)
+
+        x = self.pre_quant.forward(x)
         return x
 
     def decode(self, z_q: torch.Tensor):
+        z_q = self.post_quant.forward(z_q)
         for layer in self.decoder:
             z_q = layer.forward(z_q)
 

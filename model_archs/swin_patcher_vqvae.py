@@ -54,20 +54,22 @@ class Model(nn.Module):
         self.encoder = nn.ModuleList()
         self.decoder = nn.ModuleList()
 
-        dpr = [
-            x.item() for x in torch.linspace(0, drop_path_rate, sum(swin_depths))
-        ]  # stochastic depth decay rule
+        # dpr = [
+        #     x.item() for x in torch.linspace(0, drop_path_rate, sum(swin_depths))
+        # ]  # stochastic depth decay rule
 
         res = res_scaler(input_res, 1 / patch_size)
         self.init_patch_res = res
 
         # absolute position embedding
         if self.ape:
-            self.absolute_pos_embed = nn.Parameter(torch.zeros(1, num_patches, dim))
+            self.absolute_pos_embed = nn.Parameter(
+                torch.zeros(1, self.init_patch_res[0] * self.init_patch_res[1], dim)
+            )
             trunc_normal_(self.absolute_pos_embed, std=0.02)
 
         # Encoder Layers
-        for idx, depth in self.swin_depths:
+        for idx, depth in enumerate(self.swin_depths):
             self.encoder.append(
                 MultiSwinBlock(
                     dim,
@@ -80,7 +82,7 @@ class Model(nn.Module):
                     qk_scale,
                     drop_rate,
                     attn_drop_rate,
-                    dpr[sum(swin_depths[:idx]) : sum(swin_depths[: idx + 1])],
+                    # dpr[sum(swin_depths[:idx]) : sum(swin_depths[: idx + 1])],
                     norm_layer,
                 )
             )
@@ -89,6 +91,7 @@ class Model(nn.Module):
             dim = dim * 2
             res = res_scaler(res, 0.5)
 
+        # Vector Quantizer
         self.pre_quant = nn.Linear(dim, codebook_dim)
         self.vq = (
             VectorQuantizerEMA(num_codebook_embeddings, codebook_dim, beta, decay)
@@ -101,7 +104,7 @@ class Model(nn.Module):
         self.swin_depths.reverse()
 
         # Decoder Layers
-        for _ in range(self.num_layers):
+        for idx, depth in enumerate(self.swin_depths):
             self.decoder.append(
                 MultiSwinBlock(
                     dim,
@@ -114,7 +117,7 @@ class Model(nn.Module):
                     qk_scale,
                     drop_rate,
                     attn_drop_rate,
-                    dpr[sum(swin_depths[:idx]) : sum(swin_depths[: idx + 1])],
+                    # dpr[sum(swin_depths[:idx]) : sum(swin_depths[: idx + 1])],
                     norm_layer,
                 )
             )
@@ -131,9 +134,12 @@ class Model(nn.Module):
         x = self.patch_embedding.forward(x)
         for layer in self.encoder:
             x = layer.forward(x)
+
+        x = self.pre_quant.forward(x)
         return x
 
     def decode(self, z_q: torch.Tensor):
+        z_q = self.post_quant.forward(z_q)
         for layer in self.decoder:
             z_q = layer.forward(z_q)
 

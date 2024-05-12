@@ -1,14 +1,14 @@
 from torchvision import transforms, datasets
 
 
-def get_dataset(input_res: list[int]):
+def get_dataset(input_res: list[int], mean: list[float], std: list[float]):
     transform = transforms.Compose(
         [
             transforms.ToTensor(),
             transforms.Resize(size=input_res),
             transforms.Normalize(
-                mean=[0.4914, 0.4822, 0.4465],
-                std=[0.2823, 0.2783, 0.2990],
+                mean=mean,
+                std=std,
             ),
         ]
     )

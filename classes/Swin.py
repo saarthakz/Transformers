@@ -105,11 +105,12 @@ class PatchMerge(nn.Module):
         self,
         input_res,
         in_channels,
-        out_channels,
-        downscaling_factor,
+        out_channels=None,
+        downscaling_factor=2,
         norm_layer=nn.LayerNorm,
     ):
         super().__init__()
+        out_channels = out_channels if out_channels else in_channels * 2
         self.downscaling_factor = downscaling_factor
         self.input_res = input_res
         self.patch_merge = nn.PixelUnshuffle(downscale_factor=downscaling_factor)
@@ -151,11 +152,12 @@ class PatchExpand(nn.Module):
         self,
         input_res,
         in_channels,
-        out_channels,
-        upscaling_factor,
+        out_channels=None,
+        upscaling_factor=2,
         norm_layer=nn.LayerNorm,
     ):
         super().__init__()
+        out_channels = out_channels if out_channels else in_channels // 2
         self.upscaling_factor = upscaling_factor
         self.input_res = input_res
         self.patch_merge = nn.PixelShuffle(upscale_factor=upscaling_factor)
@@ -490,7 +492,6 @@ class MultiSwinBlock(nn.Module):
         drop (float, optional): Dropout rate (Default: 0.0)
         attn_drop (float, optional): Attention dropout rate (Default: 0.0)
         norm_layer (nn.Module, optional): Normalization layer (Default: nn.LayerNorm)
-        patch_layer (nn.Module | None, optional):
     """
 
     def __init__(

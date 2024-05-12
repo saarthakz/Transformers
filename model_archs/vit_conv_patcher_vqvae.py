@@ -96,9 +96,12 @@ class Model(nn.Module):
         x = self.patch_embedding.forward(x)
         for layer in self.encoder:
             x = layer.forward(x)
+
+        x = self.pre_quant.forward(x)
         return x
 
     def decode(self, z_q: torch.Tensor):
+        z_q = self.post_quant.forward(z_q)
         for layer in self.decoder:
             z_q = layer.forward(z_q)
 

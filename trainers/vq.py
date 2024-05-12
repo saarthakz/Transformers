@@ -22,7 +22,9 @@ def main(config: dict):
     model_name = config["model_name"]
     model_dir = os.path.join(os.getcwd(), "models", model_name)
 
-    ddp_kwargs = DistributedDataParallelKwargs(find_unused_parameters=config['acc_find_unused_params'])
+    ddp_kwargs = DistributedDataParallelKwargs(
+        find_unused_parameters=config["acc_find_unused_params"]
+    )
     accelerator = Accelerator(
         project_dir=model_dir,
         log_with="wandb",
@@ -54,12 +56,18 @@ def main(config: dict):
 
     # Dataset and Dataloaders
 
-    train_dataset = get_dataset(config["dataset"], config["input_res"])
+    train_dataset = get_dataset(
+        config["dataset"],
+        config["input_res"],
+        config["dataset_mean"],
+        config["dataset_std"],
+    )
 
     train_loader = DataLoader(
         dataset=train_dataset,
         batch_size=batch_size,
         shuffle=True,
+        drop_last=True,
     )
 
     # Model
