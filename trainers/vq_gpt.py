@@ -13,16 +13,6 @@ from torch.utils.data import DataLoader
 from accelerate import Accelerator, DistributedDataParallelKwargs
 import argparse
 import json
-from model_classes.VIT_Sampler import (
-    ViT_PoolDownsample_BilinearUpsample,
-    ViT_SS_PoolDown_BilinUp,
-)
-from model_classes.VIT_Patcher import (
-    ViT_PatchMergeExpand,
-)
-
-# from model_classes.VITVQVAE import SwinViTVQVAE
-from model_classes.VQTransformer import VQTransformer
 import wandb
 
 

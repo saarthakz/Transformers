@@ -16,10 +16,13 @@ from accelerate import Accelerator, DistributedDataParallelKwargs
 import argparse
 import json
 import wandb
+from datetime import datetime
 
 
 def main(config: dict):
-    model_name = config["model_name"]
+    model_name = (
+        f'{config["model_name"]} {datetime.now().strftime("%d-%m-%Y %H:%M:%S")}'
+    )
     model_dir = os.path.join(os.getcwd(), "models", model_name)
 
     ddp_kwargs = DistributedDataParallelKwargs(
@@ -89,17 +92,17 @@ def main(config: dict):
     # Optimizers
     optim = get_optimizer(config["optimizer"])(model.parameters(), lr=config["lr"])
 
+    # Acceleration :P
+    train_loader = accelerator.prepare_data_loader(data_loader=train_loader)
+    model = accelerator.prepare_model(model=model)
+    optim = accelerator.prepare_optimizer(optimizer=optim)
+
     # Load a state from checkpoint if required
     if config["state_from_checkpoint"]:
         accelerator.load_state(input_dir=config["state_checkpoint_path"])
         accelerator.print(
             "State loaded from checkpoint: ", config["state_checkpoint_path"]
         )
-
-    # Acceleration :P
-    train_loader = accelerator.prepare_data_loader(data_loader=train_loader)
-    model = accelerator.prepare_model(model=model)
-    optim = accelerator.prepare_optimizer(optimizer=optim)
 
     total_steps = epochs * len(train_loader)
     checkpoint_step = total_steps // config["num_checkpoints"]

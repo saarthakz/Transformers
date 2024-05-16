@@ -9,3 +9,4 @@ images
 wandb
 testing
 **/.vscode
+.gitignore
