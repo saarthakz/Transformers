@@ -98,7 +98,7 @@ class PatchEmbedding(nn.Module):
     def __init__(self, num_channels=3, dim=128, patch_size=4) -> None:
         super().__init__()
         self.num_channels = num_channels
-        self.dim = (dim,)
+        self.dim = dim
         self.patch_size = patch_size
 
         self.patcher = nn.Unfold(kernel_size=patch_size, stride=patch_size)
@@ -119,7 +119,7 @@ class PatchUnembedding(nn.Module):
     ) -> None:
         super().__init__()
         self.num_channels = num_channels
-        self.dim = (dim,)
+        self.dim = dim
         self.patch_size = patch_size
         self.input_res = input_res
 

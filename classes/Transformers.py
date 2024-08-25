@@ -99,25 +99,23 @@ class MultiHeadAttention(nn.Module):
 
     def forward(
         self,
-        query_input: torch.Tensor,
-        key_input: torch.Tensor,
-        value_input: torch.Tensor,
+        query: torch.Tensor,
+        key: torch.Tensor,
+        value: torch.Tensor,
         mask: str = "encoder",
         output_attention=False,
     ):
 
-        query = self.split(self.query(query_input))
-        key = self.split(self.key(key_input))
-        value = self.split(self.value(value_input))
+        query = self.split(self.query(query))
+        key = self.split(self.key(key))
+        value = self.split(self.value(value))
 
         C_query = query.shape[-2]
         C_key = key.shape[-2]
 
         if mask == "encoder":
             # Default mask is the encoder mask
-            mask = (
-                torch.zeros(size=(C_query, C_key)).bool().to(device=value_input.device)
-            )
+            mask = torch.zeros(size=(C_query, C_key)).bool().to(device=value.device)
         else:
             # Decoder lower left tril mask
             mask = (
@@ -125,7 +123,7 @@ class MultiHeadAttention(nn.Module):
                     torch.full(size=(C_query, C_key), fill_value=-torch.inf), diagonal=1
                 )
                 .bool()
-                .to(device=value_input.device)
+                .to(device=value.device)
             )
 
         wei = (query @ key.transpose(-2, -1)) * (
@@ -176,6 +174,9 @@ class Block(nn.Module):
         head_size = emb_dims // num_heads
 
         # Communication
+        # self.self_att = nn.MultiheadAttention(
+        #     embed_dim=emb_dims, num_heads=num_heads, dropout=dropout, batch_first=True
+        # )
         self.self_att = MultiHeadAttention(num_heads, head_size)
 
         # Computation
@@ -187,7 +188,14 @@ class Block(nn.Module):
 
     def forward(self, x, mask: str = "encoder"):
         # Residual connections allow the network to learn the simplest possible function. No matter how many complex layer we start by learning a linear function and the complex layers add in non linearity as needed to learn true function.
-        x = x + self.self_att.forward(self.ln1(x), self.ln1(x), self.ln1(x), mask)
+        _x = self.ln1(x)
+        x = x + self.self_att.forward(
+            query=_x,
+            key=_x,
+            value=_x,
+            # is_causal=True if mask == "decoder" else False,
+        )
+
         x = x + self.feed_fwd.forward(self.ln2(x))
         return x
 

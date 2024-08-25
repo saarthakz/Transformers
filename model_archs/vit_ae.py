@@ -10,7 +10,8 @@ from classes.VIT import (
     PatchUnembedding,
     Block,
 )
-from classes.VectorQuantizer import VectorQuantizerEMA
+from vector_quantize_pytorch import VectorQuantize
+
 from classes.StyleSwin import PoolDownsample, BilinearUpsample
 from classes.SPT import ShiftedPatchEmbedding
 from classes.Swin import res_scaler

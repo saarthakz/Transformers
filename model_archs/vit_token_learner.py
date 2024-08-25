@@ -3,6 +3,7 @@ import torch.nn as nn
 import os
 import sys
 from timm.models.layers import trunc_normal_
+import math
 
 sys.path.append(os.path.abspath("."))
 from classes.VIT import (
@@ -10,10 +11,10 @@ from classes.VIT import (
     PatchUnembedding,
     Block,
 )
-from vector_quantize_pytorch import VectorQuantize
-
-from classes.Swin import res_scaler, PatchExpand, PatchMerge
+from classes.Swin import res_scaler
 from classes.SPT import ShiftedPatchEmbedding
+from classes.TokenLearner import TokenLearner, TokenToSpatialTransformer
+from vector_quantize_pytorch import VectorQuantize
 
 
 class Model(nn.Module):
@@ -25,10 +26,11 @@ class Model(nn.Module):
         num_channels=3,
         num_codebook_embeddings=1024,
         codebook_dim=32,
+        num_tokens=16,
         num_blocks=[2, 2],
         num_heads=[3, 6],
         with_shifted_patch_embeddings=False,
-        beta=0.5,
+        beta=0.25,
         decay=0.99,
         **kwargs,
     ):
@@ -36,8 +38,15 @@ class Model(nn.Module):
 
         self.with_shifted_patch_embeddings = with_shifted_patch_embeddings
         self.num_layers = len(num_heads)
+        self.num_tokens = num_tokens
         self.num_heads = num_heads
         self.num_blocks = num_blocks
+
+        assert len(num_blocks) == len(
+            num_heads
+        ), "num_blocks and num_heads must be the same length"
+
+        token_learner_insertion_idx = len(num_blocks) // 2
 
         self.patch_embedding = (
             ShiftedPatchEmbedding(num_channels, dim, patch_size)
@@ -51,13 +60,18 @@ class Model(nn.Module):
         self.init_patch_res = res
 
         # Encoder Layers
-        for idx in range(self.num_layers):
-            for _ in range(self.num_blocks[idx]):
-                self.encoder.append(Block(dim, num_heads[idx]))
+        for idx in range(token_learner_insertion_idx):
+            self.encoder.extend(
+                [Block(dim, num_heads[idx]) for _ in range(num_blocks[idx])]
+            )
 
-            self.encoder.append(PatchMerge(res, dim, dim * 2, 2))
-            dim = dim * 2
-            res = res_scaler(res, 0.5)
+        # Add the TokenLearner at the half point
+        self.encoder.append(TokenLearner(num_tokens, dim))
+
+        for idx in range(token_learner_insertion_idx, self.num_layers):
+            self.encoder.extend(
+                [Block(dim, num_heads[idx]) for _ in range(num_blocks[idx])]
+            )
 
         self.pre_quant = nn.Linear(dim, codebook_dim)
         self.vq = VectorQuantize(
@@ -66,12 +80,17 @@ class Model(nn.Module):
         self.post_quant = nn.Linear(codebook_dim, dim)
 
         # Decoder Layers
-        for idx in range(self.num_layers):
-            for _ in range(self.num_blocks[idx]):
-                self.decoder.append(Block(dim, num_heads[idx]))
-            self.decoder.append(PatchExpand(res, dim, dim // 2, 2))
-            dim = dim // 2
-            res = res_scaler(res, 2)
+        for idx in range(token_learner_insertion_idx, self.num_layers):
+            self.decoder.extend(
+                [Block(dim, num_heads[idx]) for _ in range(num_blocks[idx])]
+            )
+
+        self.decoder.append(TokenToSpatialTransformer(*self.init_patch_res, dim))
+
+        for idx in range(token_learner_insertion_idx):
+            self.decoder.extend(
+                [Block(dim, num_heads[idx]) for _ in range(num_blocks[idx])]
+            )
 
         self.patch_unembedding = PatchUnembedding(
             input_res, num_channels, dim, patch_size
@@ -95,16 +114,7 @@ class Model(nn.Module):
         return z_q
 
     def quantize(self, x_enc: torch.Tensor):
-        B, C, D = x_enc.shape
-        patch_H, patch_W = res_scaler(self.init_patch_res, 1 / (2**self.num_layers))
-
-        assert (
-            C == patch_H * patch_W
-        ), f"Input patch length {C} does not match the patch resolution {patch_H} {patch_W}"
-        x_enc = x_enc.transpose(-2, -1).view(B, D, patch_H, patch_W)
-        z_q, indices, loss = self.vq.forward(x_enc)  # Vector Quantizer
-        z_q = z_q.view(B, D, C).transpose(-2, -1)
-        return z_q, indices, loss
+        return self.vq.forward(x_enc)  # Vector Quantizer
 
     def forward(self, img: torch.Tensor):
         x_enc = self.encode(img)  # Encoder

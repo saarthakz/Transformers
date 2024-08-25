@@ -9,7 +9,8 @@ from classes.VIT import (
     PatchEmbedding,
     PatchUnembedding,
 )
-from classes.VectorQuantizer import VectorQuantizerEMA, VectorQuantizer
+from vector_quantize_pytorch import VectorQuantize
+
 from classes.Swin import res_scaler, MultiSwinBlock, PatchExpand, PatchMerge
 from classes.SPT import ShiftedPatchEmbedding
 
@@ -93,10 +94,8 @@ class Model(nn.Module):
 
         # Vector Quantizer
         self.pre_quant = nn.Linear(dim, codebook_dim)
-        self.vq = (
-            VectorQuantizerEMA(num_codebook_embeddings, codebook_dim, beta, decay)
-            if int(decay)
-            else VectorQuantizer(num_codebook_embeddings, codebook_dim, beta)
+        self.vq = VectorQuantize(
+            codebook_dim, num_codebook_embeddings, decay=decay, commitment_weight=beta
         )
         self.post_quant = nn.Linear(codebook_dim, dim)
 

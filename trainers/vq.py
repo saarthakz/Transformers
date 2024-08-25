@@ -16,12 +16,12 @@ from accelerate import Accelerator, DistributedDataParallelKwargs
 import argparse
 import json
 import wandb
-from datetime import datetime
+from datetime import datetime, UTC
 
 
 def main(config: dict):
     model_name = (
-        f'{config["model_name"]} {datetime.now().strftime("%d-%m-%Y %H:%M:%S")}'
+        f'{config["model_name"]} {datetime.now(UTC).strftime("%d-%m-%Y %H:%M:%S")} UTC'
     )
     model_dir = os.path.join(os.getcwd(), "models", model_name)
 
@@ -40,7 +40,7 @@ def main(config: dict):
 
     if config["tracking"]:
         accelerator.init_trackers(
-            project_name="Major-Project",
+            project_name="VQ-Models",
             config=config,
             init_kwargs={
                 "wandb": {

@@ -6,7 +6,8 @@ from timm.models.layers import trunc_normal_
 
 sys.path.append(os.path.abspath("."))
 from classes.VIT import PatchEmbedding, PatchUnembedding, Block, ConvAttention
-from classes.VectorQuantizer import VectorQuantizerEMA, VectorQuantizer
+from vector_quantize_pytorch import VectorQuantize
+
 from classes.Swin import res_scaler, ConvPatchExpand, ConvPatchMerge
 
 
@@ -62,10 +63,8 @@ class Model(nn.Module):
             res = res_scaler(res, 0.5)
 
         self.pre_quant = nn.Linear(dim, codebook_dim)
-        self.vq = (
-            VectorQuantizerEMA(num_codebook_embeddings, codebook_dim, beta, decay)
-            if int(decay)
-            else VectorQuantizer(num_codebook_embeddings, codebook_dim, beta)
+        self.vq = VectorQuantize(
+            codebook_dim, num_codebook_embeddings, decay=decay, commitment_weight=beta
         )
         self.post_quant = nn.Linear(codebook_dim, dim)
 

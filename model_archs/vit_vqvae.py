@@ -5,7 +5,8 @@ import os
 import sys
 
 sys.path.append(os.path.abspath("."))
-from classes.VectorQuantizer import VectorQuantizer, VectorQuantizerEMA
+from vector_quantize_pytorch import VectorQuantize
+
 from classes.VIT import (
     ViTEncoder,
     ViTDecoder,
