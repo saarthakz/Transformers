@@ -74,7 +74,6 @@ class SelfAttentionHead(nn.Module):
         out = wei @ value  # (B, C_Q, C_K) @ (B, C_K, H) -> (B, C_Q, H)
         return out
 
-
 # Multiple Self Attention Heads in Parallel
 class MultiHeadAttention(nn.Module):
 
@@ -144,6 +143,47 @@ class MultiHeadAttention(nn.Module):
 
         return values
 
+class MHAPyTorchScaledDotProduct(nn.Module):
+    def __init__(self, embed_dim, num_heads, dropout=0.0, qkv_bias=False):
+        super().__init__()
+
+        assert embed_dim % num_heads == 0, "embed_dim is indivisible by num_heads"
+
+        self.embed_dim = embed_dim
+        self.num_heads = num_heads
+        self.head_dim = embed_dim // num_heads
+
+        self.qkv = nn.Linear(embed_dim, 3 * embed_dim, bias=qkv_bias)
+        self.proj = nn.Linear(embed_dim, embed_dim)
+        self.dropout = dropout
+
+    def forward(self, x: torch.Tensor, attn_mask: Union[None, torch.Tensor]=None, is_causal=False):
+        batch_size, num_tokens, embed_dim = x.shape
+
+        # (b, num_tokens, embed_dim) --> (b, num_tokens, 3 * embed_dim)
+        qkv = self.qkv(x)
+
+        # (b, num_tokens, 3 * embed_dim) --> (b, num_tokens, 3, num_heads, head_dim)
+        qkv = qkv.view(batch_size, num_tokens, 3, self.num_heads, self.head_dim)
+
+        # (b, num_tokens, 3, num_heads, head_dim) --> (3, b, num_heads, num_tokens, head_dim)
+        qkv = qkv.permute(2, 0, 3, 1, 4)
+
+        # (3, b, num_heads, num_tokens, head_dim) -> 3 times (b, num_heads, num_tokens, head_dim)
+        queries, keys, values = qkv
+
+        use_dropout = 0. if not self.training else self.dropout
+
+        context_vec = nn.functional.scaled_dot_product_attention(
+            queries, keys, values, attn_mask=attn_mask, dropout_p=use_dropout, is_causal=is_causal)
+
+        # Combine heads, where self.d_out = self.num_heads * self.head_dim
+        context_vec = context_vec.transpose(1, 2).contiguous().view(batch_size, num_tokens, self.embed_dim)
+
+        context_vec = self.proj(context_vec)
+
+        return context_vec
+
 
 # A Simple Linear Layer with GELU for adding computational abilities
 class FeedForward(nn.Module):
@@ -152,11 +192,9 @@ class FeedForward(nn.Module):
         super().__init__()
         self.net = nn.Sequential(
             nn.Linear(emb_dims, inner_dims),
-            nn.GELU(),
+            nn.SiLU(),
             nn.Dropout(dropout),
             nn.Linear(inner_dims, emb_dims),
-            nn.GELU(),
-            nn.Dropout(dropout),
         )
 
     def forward(self, x):
@@ -168,16 +206,14 @@ class Block(nn.Module):
 
     def __init__(self, emb_dims, num_heads, dropout=0):
         # emb_dims: embedding dimension, num_heads: the number of heads we'd like
-        super().__init__()
-
-        # Divide the embedding dimensions by the number of heads to get the head size
-        head_size = emb_dims // num_heads
+        super().__init__()        
 
         # Communication
         # self.self_att = nn.MultiheadAttention(
         #     embed_dim=emb_dims, num_heads=num_heads, dropout=dropout, batch_first=True
         # )
-        self.self_att = MultiHeadAttention(num_heads, head_size)
+        # self.self_att = MultiHeadAttention(num_heads, emb_dims // num_heads)
+        self.self_att = MHAPyTorchScaledDotProduct(emb_dims, num_heads, dropout)
 
         # Computation
         self.feed_fwd = FeedForward(emb_dims, emb_dims * 4, dropout)
@@ -186,21 +222,17 @@ class Block(nn.Module):
         self.ln1 = nn.LayerNorm(emb_dims)
         self.ln2 = nn.LayerNorm(emb_dims)
 
-    def forward(self, x, mask: str = "encoder"):
+    def forward(self, x, mask: Union[None, torch.Tensor] = None, is_causal = False):
+        """
+        For a custom mask, use "mask" but for decoder/causal mask use "is_causal".
+        """
         # Residual connections allow the network to learn the simplest possible function. No matter how many complex layer we start by learning a linear function and the complex layers add in non linearity as needed to learn true function.
-        _x = self.ln1(x)
-        x = x + self.self_att.forward(
-            query=_x,
-            key=_x,
-            value=_x,
-            # is_causal=True if mask == "decoder" else False,
-        )
-
+        x = x + self.self_att.forward(self.ln1(x), mask)
         x = x + self.feed_fwd.forward(self.ln2(x))
         return x
 
 
-class Transformer(nn.Module):
+class GPT(nn.Module):
 
     def __init__(
         self,
@@ -208,7 +240,7 @@ class Transformer(nn.Module):
         emb_dims: int,
         vocab_size: int,
         num_heads: int,
-        mask="decoder",
+        mask: Union[None, torch.Tensor]=None
     ):
         super().__init__()
 

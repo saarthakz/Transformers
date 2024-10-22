@@ -75,7 +75,7 @@ class Model(nn.Module):
         codebook_dim=128,
         num_heads: list[int] = [4, 4, 4],
         dropout=0,
-        beta=0.5,
+        beta=0.25,
         decay=0.99,
         **kwargs,
     ):

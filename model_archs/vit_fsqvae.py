@@ -1,9 +1,12 @@
+from typing import List
 from classes.Swin import res_scaler
 from classes.VIT import (
     ViTEncoder,
     ViTDecoder,
 )
-from vector_quantize_pytorch import VectorQuantize
+
+
+from classes.FSQ import FSQ
 import math
 import torch
 import torch.nn as nn
@@ -16,7 +19,7 @@ sys.path.append(os.path.abspath("."))
 class Model(nn.Module):
     """
     Args:
-        input_res (list[int]): Image size as (H, W),
+        input_res (List[int]): Image size as (H, W),
         patch_size (int): Patch size,
         num_channels (int): Number of input image channels,
         embed_dim (int): Initial Patch embedding dimension,
@@ -31,16 +34,13 @@ class Model(nn.Module):
 
     def __init__(
         self,
-        input_res: list[int],
+        input_res: List[int],
         dim: int,
         patch_size: int,
         num_channels: int,
-        num_codebook_embeddings: int,
-        codebook_dim: int,
-        num_heads: list[int],
+        codebook_levels: List[int],
+        num_heads: List[int],
         dropout: int,
-        beta=0.25,
-        decay=0.99,
         **kwargs,
     ):
         super().__init__()
@@ -63,13 +63,7 @@ class Model(nn.Module):
             num_heads,
             dropout,
         )
-        self.quantizer = VectorQuantize(
-            dim=dim, 
-            codebook_dim=codebook_dim,  
-            codebook_size=num_codebook_embeddings, 
-            decay=decay, 
-            commitment_weight=beta,
-        )
+        self.quantizer = FSQ(levels=codebook_levels, dim=dim)
 
     def freeze(self):
         self.eval()
@@ -90,8 +84,9 @@ class Model(nn.Module):
 
     def forward(self, x: torch.Tensor):
         x_enc = self.encode(x)  # Encoder
-        z_q, indices, loss = self.quantize(x_enc)  # Vector Quantizer
+        z_q, indices = self.quantize(x_enc)  # Scalar Quantizer
         recon_imgs = self.decode(z_q)  # Decoder
+        loss = torch.tensor(data=0)  # To mimic the VQ loss which does not exists in FSQ
         return recon_imgs, indices, loss
 
     def get_recons(self, x: torch.Tensor):

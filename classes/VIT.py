@@ -6,114 +6,35 @@ from torch import nn
 from torch.nn import functional
 
 sys.path.append(os.path.abspath("."))
-from classes.Transformers import Block, FeedForward, MultiHeadAttention
-from classes.SpectralNorm import SpectralNorm
+from classes.Transformers import Block
 from classes.Swin import res_scaler
 from einops import rearrange, einsum
 
 
-def stable_softmax(t, dim=-1, alpha=32**2):
-    t = t / alpha
-    t = t - torch.amax(t, dim=dim, keepdim=True).detach()
-    return (t * alpha).softmax(dim=dim)
-
-
-class LayerNormChan(nn.Module):
-    def __init__(self, dim, eps=1e-5):
-        super().__init__()
-        self.eps = eps
-        self.gamma = nn.Parameter(torch.ones(1, dim, 1, 1))
-
-    def forward(self, x):
-        var = torch.var(x, dim=1, unbiased=False, keepdim=True)
-        mean = torch.mean(x, dim=1, keepdim=True)
-        return (x - mean) / (var + self.eps).sqrt() * self.gamma
-
-
-class ConvAttention(nn.Module):
-    def __init__(self, dim, dim_head=64, heads=8, dropout=0.0):
-        super().__init__()
-        self.heads = heads
-        self.scale = dim_head**-0.5
-        inner_dim = heads * dim_head
-
-        self.dropout = nn.Dropout(dropout)
-        self.pre_norm = LayerNormChan(dim)
-
-        self.to_qkv = nn.Conv2d(dim, inner_dim * 3, 1, bias=False)
-        self.to_out = nn.Conv2d(inner_dim, dim, 1, bias=False)
-
-    def forward(self, x):
-        h = self.heads
-        height, width, residual = *x.shape[-2:], x.clone()
-
-        x = self.pre_norm(x)
-
-        q, k, v = self.to_qkv(x).chunk(3, dim=1)
-
-        q, k, v = map(
-            lambda t: rearrange(t, "b (h c) x y -> b h c (x y)", h=h), (q, k, v)
-        )
-
-        sim = einsum(q, k, "b h c i, b h c j -> b h i j") * self.scale
-
-        attn = stable_softmax(sim, dim=-1)
-        attn = self.dropout(attn)
-
-        out = einsum(attn, v, "b h i j, b h c j -> b h c i")
-        out = rearrange(out, "b h c (x y) -> b (h c) x y", x=height, y=width)
-        out = self.to_out(out)
-
-        return out + residual
-
-
-class ConvPatchEmbedding(nn.Module):
-    """
-    Convert the image into non overlapping patches and then project them into a vector space.
-    """
-
-    def __init__(self, num_channels: int, dim: int, patch_size: int):
-        super().__init__()
-        self.patch_size = patch_size
-        self.num_channels = num_channels
-        self.embed_dim = dim
-
-        # Create a projection layer to convert the image into patches
-        # The layer projects each patch into a vector of size hidden_size
-        self.projection = nn.Conv2d(
-            self.num_channels,
-            self.embed_dim,
-            kernel_size=self.patch_size,
-            stride=self.patch_size,
-        )
-
-    def forward(self, x: torch.Tensor):
-        # (batch_size, num_channels, image_size, image_size) -> (batch_size, num_patches, hidden_size)
-        x = self.projection.forward(x)
-        x = x.flatten(-2).transpose(-2, -1)
-        return x
-
-
 class PatchEmbedding(nn.Module):
-    def __init__(self, num_channels=3, dim=128, patch_size=4) -> None:
-        super().__init__()
-        self.num_channels = num_channels
-        self.dim = dim
+    def __init__(self, in_channels: int, patch_size: int, embed_dim: int):
+        super(PatchEmbedding, self).__init__()
         self.patch_size = patch_size
+        self.embed_dim = embed_dim
+        # Linear layer to project flattened patches to embedding dimension
+        self.projection = nn.Linear(in_channels * patch_size * patch_size, embed_dim)
 
-        self.patcher = nn.Unfold(kernel_size=patch_size, stride=patch_size)
-        self.lin = nn.Linear(
-            in_features=num_channels * (patch_size**2), out_features=dim
-        )
+    def forward(self, x):
+        # x: [batch_size, channels, height, width]
+        batch_size, channels, height, width = x.shape
+        assert height % self.patch_size == 0 and width % self.patch_size == 0, \
+            "Image dimensions must be divisible by the patch size."
 
-    def forward(self, x: torch.Tensor):
-        x = self.patcher.forward(x)
-        x = x.transpose(-1, -2)
-        x = self.lin.forward(x)
+        # Rearrange the image to patches: [batch_size, channels, height // patch_size, patch_size, width // patch_size, patch_size]
+        # Then flatten the patches: [batch_size, (height // patch_size) * (width // patch_size), channels * patch_size * patch_size]
+        x = rearrange(x, 'b c (h p1) (w p2) -> b (h w) (c p1 p2)', p1=self.patch_size, p2=self.patch_size)
+        
+        # Project the patches to the embedding dimension
+        x = self.projection(x)  # [batch_size, num_patches, embed_dim]
         return x
 
 
-class PatchUnembedding(nn.Module):
+class PatchToImage(nn.Module):
     def __init__(
         self, input_res: list[int], num_channels=3, dim=128, patch_size=4
     ) -> None:
@@ -137,54 +58,6 @@ class PatchUnembedding(nn.Module):
         return x
 
 
-class ConvPatchUnembedding(nn.Module):
-    def __init__(
-        self,
-        patch_res: list[int],
-        num_channels: int,
-        dim: int,
-        patch_size: int,
-    ) -> None:
-        super().__init__()
-        self.dim = dim
-        self.patch_res = patch_res
-        self.patch_size = patch_size
-        self.upscale = nn.ConvTranspose2d(
-            in_channels=dim,
-            out_channels=num_channels,
-            kernel_size=patch_size,
-            stride=patch_size,
-        )
-
-    def forward(self, x: torch.Tensor):
-        B, C, D = x.shape
-        H, W = self.patch_res
-
-        assert H * W == C, f"Image dimensions don't match; {H} * {W} != {C} "
-        x = x.transpose(-2, -1)  # B, D, C
-        x = x.view(B, D, H, W)
-        img = self.upscale.forward(input=x)
-        return img
-
-
-class PatchModifier(nn.Module):
-    def __init__(self, dim: int, num_tokens_out: int, use_scale=True):
-        super().__init__()
-        self.use_scale = use_scale
-        if self.use_scale:
-            self.scale = dim**-0.5
-        self.norm = nn.LayerNorm(dim, eps=1e-5)
-        self.queries = nn.Parameter(torch.randn(num_tokens_out, dim))
-
-    def forward(self, x: torch.Tensor):
-        x = self.norm(x)
-        sim = self.queries @ x.transpose(1, 2)
-        if self.use_scale:
-            sim = sim * self.scale
-        attn = functional.softmax(sim, dim=-1)
-        return attn @ x
-
-
 class ViTEncoder(nn.Module):
     def __init__(
         self,
@@ -204,7 +77,7 @@ class ViTEncoder(nn.Module):
             H % patch_size == 0 and W % patch_size == 0
         ), "Image dimensions must be divisible by the patch size."
 
-        self.patch_embedding = ConvPatchEmbedding(num_channels, embed_dim, patch_size)
+        self.patch_embedding = PatchEmbedding(num_channels, patch_size, embed_dim)
 
         scale = embed_dim**-0.5
         self.patch_res = res_scaler(self.input_res, 1 / self.patch_size)
@@ -273,8 +146,8 @@ class ViTDecoder(nn.Module):
         self.transformer = nn.Sequential(
             *[Block(embed_dim, heads, dropout) for heads in num_heads]
         )
-        self.proj = ConvPatchUnembedding(
-            self.patch_res, num_channels, embed_dim, patch_size
+        self.proj = PatchToImage(
+            input_res, num_channels, embed_dim, patch_size
         )
 
         self.initialize_weights()

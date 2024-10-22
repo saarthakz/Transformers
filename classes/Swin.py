@@ -5,11 +5,10 @@ import sys
 from einops import repeat
 
 sys.path.append(os.path.abspath("."))
-from typing import Union
-
-# ## Functions
+from typing import List, Union
 
 
+# Functions
 def window_partition(x, window_size: int):
     """
     Args:
@@ -66,13 +65,13 @@ def window_combination(windows, window_size, H, W):
     return x
 
 
-def res_scaler(input_res: list[int], factor: float):
+def res_scaler(input_res: list[int], factor: float) -> List[int]:
     H, W = input_res
     H, W = H * factor, W * factor
-    return (int(H), int(W))
+    return [int(H), int(W)]
 
 
-# ## Modules
+# Modules
 
 
 class MLP(nn.Module):
@@ -133,10 +132,13 @@ class PatchMerge(nn.Module):
 
 
 class ConvPatchMerge(nn.Module):
-    def __init__(self, dim, dim_out) -> None:
+    def __init__(self, input_res: List[int], dim: int, dim_out: int) -> None:
         super().__init__()
         # https://arxiv.org/abs/2208.03641 shows this is the most optimal way to downsample
         # named SP-conv in the paper, but basically a pixel unshuffle
+        self.dim = dim
+        self.dim_out = dim_out
+        self.input_res = input_res
         self.net = nn.Sequential(
             nn.PixelUnshuffle(2),
             # Rearrange('b c (h s1) (w s2) -> b (c s1 s2) h w', s1 = 2, s2 = 2),
@@ -144,7 +146,13 @@ class ConvPatchMerge(nn.Module):
         )
 
     def forward(self, x: torch.Tensor):
-        return self.net.forward(x)
+        H, W = self.input_res
+        B, L, C = x.shape
+        assert L == H * W, f"L: {L} is not equal H*W: {H}*{W}={H*W}"
+        x = x.permute(0, 2, 1).view(B, C, H, W)
+        x = self.net.forward(x)
+        x = x.view(B, self.dim_out, -1).permute(0, 2, 1)
+        return x
 
 
 class PatchExpand(nn.Module):
@@ -184,8 +192,11 @@ class ConvPatchExpand(nn.Module):
     https://arxiv.org/ftp/arxiv/papers/1707/1707.02937.pdf
     """
 
-    def __init__(self, dim, dim_out):
+    def __init__(self, input_res: List[int], dim: int, dim_out: int):
         super().__init__()
+        self.input_res = input_res
+        self.dim = dim
+        self.dim_out = dim_out
         self.conv = nn.Conv2d(dim, dim_out * 4, kernel_size=1)
 
         self.net = nn.Sequential(nn.SiLU(), nn.PixelShuffle(2))
@@ -202,8 +213,14 @@ class ConvPatchExpand(nn.Module):
         nn.init.zeros_(self.conv.bias.data)
 
     def forward(self, x):
+        H, W = self.input_res
+        B, L, C = x.shape
+        assert L == H * W, f"L: {L} is not equal H*W: {H}*{W}={H*W}"
+        x = x.permute(0, 2, 1).view(B, C, H, W)
         x = self.conv.forward(x)
-        return self.net.forward(x)
+        x = self.net.forward(x)
+        x = x.view(B, self.dim_out, -1).permute(0, 2, 1)
+        return x
 
 
 class WindowAttention(nn.Module):
@@ -492,6 +509,8 @@ class MultiSwinBlock(nn.Module):
         drop (float, optional): Dropout rate (Default: 0.0)
         attn_drop (float, optional): Attention dropout rate (Default: 0.0)
         norm_layer (nn.Module, optional): Normalization layer (Default: nn.LayerNorm)
+        final_layer (nn.Module, optional): Final layer. Could a PatchMerge, PatchExpand, Identity or any other nn.Module (Default: nn.Identity)
+
     """
 
     def __init__(
@@ -506,7 +525,8 @@ class MultiSwinBlock(nn.Module):
         qk_scale=None,
         drop=0.0,
         attn_drop=0.0,
-        norm_layer=nn.LayerNorm,
+        norm_layer: nn.Module = nn.LayerNorm,
+        final_layer: nn.Module = nn.Identity(),
     ):
         super().__init__()
         self.dim = dim
@@ -532,6 +552,7 @@ class MultiSwinBlock(nn.Module):
                 for idx in range(depth)
             ]
         )
+        self.blocks.append(final_layer)
 
     def forward(self, x: torch.Tensor):
         x = self.blocks.forward(x)

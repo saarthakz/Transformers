@@ -25,14 +25,10 @@ def main(config: dict):
     )
     model_dir = os.path.join(os.getcwd(), "models", model_name)
 
-    ddp_kwargs = DistributedDataParallelKwargs(
-        find_unused_parameters=config["acc_find_unused_params"]
-    )
     accelerator = Accelerator(
         project_dir=model_dir,
         log_with="wandb",
         gradient_accumulation_steps=config["gradient_accumulation_steps"],
-        kwargs_handlers=[ddp_kwargs],
     )
 
     # Print the config file
@@ -50,8 +46,9 @@ def main(config: dict):
             },
         )
 
-    if accelerator.is_main_process:
+    if accelerator.is_main_process and config["logging"]:
         os.makedirs(name=model_dir, exist_ok=True)
+        json.dump(config, open(os.path.join(model_dir, "config.json"), "w"))
         logger = Logger(os.path.join(model_dir, "log.txt"))
 
     epochs = config["epochs"]
@@ -83,7 +80,7 @@ def main(config: dict):
     )
 
     # Load a model checkpoint
-    if config["model_from_checkpoint"]:
+    if "model_from_checkpoint" in config and config["model_from_checkpoint"]:
         model.load_state_dict(torch.load(f=config["model_checkpoint_path"]))
         accelerator.print(
             "Model loaded from checkpoint: ", config["model_checkpoint_path"]
@@ -98,7 +95,7 @@ def main(config: dict):
     optim = accelerator.prepare_optimizer(optimizer=optim)
 
     # Load a state from checkpoint if required
-    if config["state_from_checkpoint"]:
+    if "state_from_checkpoint" in config and config["state_from_checkpoint"]:
         accelerator.load_state(input_dir=config["state_checkpoint_path"])
         accelerator.print(
             "State loaded from checkpoint: ", config["state_checkpoint_path"]
@@ -164,7 +161,8 @@ def main(config: dict):
         total_loss += epoch_loss
         if accelerator.is_main_process:
             epoch_loss_log = f"Epoch: {epoch}, Avg Epoch Loss {epoch_loss / (step + 1)}, Net Avg Loss: {total_loss / (total_steps + 1)}"
-            logger.log(epoch_loss_log)
+            if config["logging"]:
+                logger.log(epoch_loss_log)
 
     accelerator.wait_for_everyone()
     accelerator.end_training()

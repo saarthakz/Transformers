@@ -4,7 +4,7 @@ import os
 import sys
 
 sys.path.append(os.path.abspath("."))
-from classes.Transformers import Transformer
+from classes.Transformers import GPT
 from classes.Swin import res_scaler
 
 
@@ -30,7 +30,7 @@ class Model(nn.Module):
         H, W = self.patch_res
         self.num_patches = H * W
 
-        self.transformer = Transformer(
+        self.transformer = GPT(
             context=512,
             emb_dims=dim,
             vocab_size=num_codebook_embeddings,

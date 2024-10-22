@@ -21,12 +21,10 @@ def main(config: dict):
     gpt_model_name = f"{config['model_name']} GPT"
     model_dir = os.path.join(os.getcwd(), "models", model_name)
 
-    ddp_kwargs = DistributedDataParallelKwargs(find_unused_parameters=True)
     accelerator = Accelerator(
         project_dir=model_dir,
-        # log_with="wandb",
+        log_with="wandb",
         gradient_accumulation_steps=config["gradient_accumulation_steps"],
-        kwargs_handlers=[ddp_kwargs],
     )
 
     # Print the config file

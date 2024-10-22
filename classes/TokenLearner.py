@@ -2,6 +2,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from classes.Transformers import MHAPyTorchScaledDotProduct
+
 
 class TokenLearner(nn.Module):
     """TokenLearner module Version 1.1, using slightly different conv. layers.
@@ -81,9 +83,7 @@ class TokenToSpatialTransformer(nn.Module):
         self.spatial_embeddings = nn.Parameter(torch.randn(1, height * width, dim))
 
         # Self-attention mechanism with batch_first=True
-        self.attention = nn.MultiheadAttention(
-            embed_dim=dim, num_heads=8, batch_first=True
-        )
+        self.attention = MHAPyTorchScaledDotProduct(dim, num_heads=8)
 
         # Linear projection to map tokens to spatial features
 
@@ -109,3 +109,4 @@ class TokenToSpatialTransformer(nn.Module):
 
         # Linear projection
         return self.proj(attended_tokens)  # Shape: (batch, height * width, dim)
+
