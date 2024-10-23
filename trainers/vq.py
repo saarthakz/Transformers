@@ -123,6 +123,10 @@ def main(config: dict):
                 recon, codebook_indices, q_loss = model.forward(x)
                 recon_loss = nn.functional.mse_loss(x, recon)
                 loss: torch.Tensor = q_loss + recon_loss
+
+                if accelerator.is_main_process:
+                    progress_bar.set_postfix_str("Loss:" + str(loss.detach().item()))
+
                 epoch_loss += loss.detach().item()
                 optim.zero_grad()
                 accelerator.backward(loss)

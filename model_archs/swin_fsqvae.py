@@ -4,13 +4,21 @@ from typing import List
 
 sys.path.append(os.path.abspath("."))
 
-from classes.Swin import res_scaler, MultiSwinBlock, ConvPatchMerge, ConvPatchExpand
+from classes.Swin import (
+    res_scaler,
+    MultiSwinBlock,
+    ConvPatchMerge,
+    ConvPatchExpand,
+    PatchMerge,
+    PatchExpand,
+)
 from classes.VIT import (
     PatchEmbedding,
     PatchToImage,
-    Block,
 )
-from classes.FSQ import FSQ
+
+# from classes.FSQ import FSQ
+from vector_quantize_pytorch import FSQ
 import torch
 import torch.nn as nn
 
@@ -71,6 +79,7 @@ class Model(nn.Module):
                     num_heads[idx],
                     window_size=window_size,
                     final_layer=ConvPatchMerge(res, dim, dim * 2),
+                    # final_layer=PatchMerge(res, dim, dim * 2),
                 )
             )
             res = res_scaler(res, 1 / 2)
@@ -88,6 +97,7 @@ class Model(nn.Module):
                     num_heads[idx],
                     window_size=window_size,
                     final_layer=ConvPatchExpand(res, dim, dim // 2),
+                    # final_layer=PatchExpand(res, dim, dim // 2),
                 )
             )
             res = res_scaler(res, 2)
@@ -108,7 +118,8 @@ class Model(nn.Module):
         return z_q
 
     def quantize(self, x_enc: torch.Tensor):
-        return self.quantizer.forward(x_enc)  # Vector Quantizer
+        z_q, indices = self.quantizer.forward(x_enc)
+        return z_q, indices
 
     def forward(self, img: torch.Tensor):
         x_enc = self.encode(img)  # Encoder

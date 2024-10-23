@@ -124,10 +124,11 @@ class FSQ(Module):
         self.force_quantization_f32 = force_quantization_f32
 
     def bound(self, z, eps=1e-3):
+        print("Z: ", z)
         """Bound `z`, an array of shape (..., d)."""
         assert all(x % 2 != 0 for x in self._levels), "Not all elements are odd"
-
         half_l = (self._levels - 1) * (1 - eps) / 2
+        print(torch.tanh(z) * half_l.to(z.device))
         return torch.tanh(z) * half_l.to(z.device)
 
     '''
@@ -141,7 +142,8 @@ class FSQ(Module):
 
     def quantize(self, z):
         """Quantizes z, returns quantized zhat, same shape as z."""
-        quantized = round_ste(self.bound(z))
+        bound_z = self.bound(z)
+        quantized = round_ste(bound_z)
         half_width = self._levels // 2  # Renormalize to [-1, 1].
         return quantized / half_width
 

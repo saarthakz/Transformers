@@ -80,7 +80,7 @@ class MLP(nn.Module):
         in_features: int,
         hidden_features=Union[None | int],
         out_features=Union[None | int],
-        act_layer=nn.GELU,
+        act_layer=nn.SiLU,
         drop=0.0,
     ):
         super().__init__()
@@ -127,7 +127,7 @@ class PatchMerge(nn.Module):
         x = self.patch_merge(x)
         x = x.view(B, C * 4, -1).permute(0, 2, 1)
         x = self.proj(x)
-        self.norm(x)
+        x = self.norm(x)
         return x
 
 
@@ -142,16 +142,16 @@ class ConvPatchMerge(nn.Module):
         self.net = nn.Sequential(
             nn.PixelUnshuffle(2),
             # Rearrange('b c (h s1) (w s2) -> b (c s1 s2) h w', s1 = 2, s2 = 2),
-            nn.Conv2d(dim * 4, dim_out, kernel_size=1),
+            nn.Conv2d(dim * 4, dim_out, kernel_size=1, stride=1),
         )
 
     def forward(self, x: torch.Tensor):
         H, W = self.input_res
         B, L, C = x.shape
         assert L == H * W, f"L: {L} is not equal H*W: {H}*{W}={H*W}"
-        x = x.permute(0, 2, 1).view(B, C, H, W)
+        x = x.permute(0, 2, 1).contiguous().view(B, C, H, W)
         x = self.net.forward(x)
-        x = x.view(B, self.dim_out, -1).permute(0, 2, 1)
+        x = x.view(B, self.dim_out, -1).permute(0, 2, 1).contiguous()
         return x
 
 
@@ -173,7 +173,7 @@ class PatchExpand(nn.Module):
             in_features=in_channels // (upscaling_factor**2),
             out_features=out_channels,
         )
-        self.norm = norm_layer([out_channels, *res_scaler(input_res, 2)])
+        self.norm = norm_layer(out_channels)
 
     def forward(self, x):
         H, W = self.input_res
@@ -183,6 +183,7 @@ class PatchExpand(nn.Module):
         x = self.patch_merge(x)
         x = x.view(B, C // 4, -1).permute(0, 2, 1)
         x = self.proj(x)
+        x = self.norm(x)
         return x
 
 
@@ -197,7 +198,7 @@ class ConvPatchExpand(nn.Module):
         self.input_res = input_res
         self.dim = dim
         self.dim_out = dim_out
-        self.conv = nn.Conv2d(dim, dim_out * 4, kernel_size=1)
+        self.conv = nn.Conv2d(dim, dim_out * 4, kernel_size=1, stride=1)
 
         self.net = nn.Sequential(nn.SiLU(), nn.PixelShuffle(2))
 
@@ -212,14 +213,14 @@ class ConvPatchExpand(nn.Module):
         self.conv.weight.data.copy_(conv_weight)
         nn.init.zeros_(self.conv.bias.data)
 
-    def forward(self, x):
+    def forward(self, x: torch.Tensor):
         H, W = self.input_res
         B, L, C = x.shape
         assert L == H * W, f"L: {L} is not equal H*W: {H}*{W}={H*W}"
-        x = x.permute(0, 2, 1).view(B, C, H, W)
+        x = x.permute(0, 2, 1).contiguous().view(B, C, H, W)
         x = self.conv.forward(x)
         x = self.net.forward(x)
-        x = x.view(B, self.dim_out, -1).permute(0, 2, 1)
+        x = x.view(B, self.dim_out, -1).permute(0, 2, 1).contiguous()
         return x
 
 
@@ -345,7 +346,7 @@ class SingleSwinBlock(nn.Module):
         attn_drop (float, optional): Attention dropout rate. Default: 0.0
         drop_path (float, optional): Stochastic depth rate. Default: 0.0
         act_layer(nn.Module, optional): Activation layer. Default: nn.GELU
-        norm_layer (nn.Module, optional): NOrmalization layer. Default: nn.LayerNorm
+        norm_layer (nn.Module, optional): Normalization layer. Default: nn.LayerNorm
     """
 
     def __init__(
@@ -360,7 +361,7 @@ class SingleSwinBlock(nn.Module):
         qk_scale=None,
         drop=0.0,
         attn_drop=0.0,
-        act_layer=nn.GELU,
+        act_layer=nn.SiLU,
         norm_layer=nn.LayerNorm,
     ):
         super().__init__()
